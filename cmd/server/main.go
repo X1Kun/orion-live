@@ -59,8 +59,11 @@ func main() {
 	checker := health.NewChecker(sqlDB, redis, rabbitMQ)
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
+	liveSessionRepo := repository.NewLiveSessionRepository(db)
+	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
 	engine := router.New(
 		handler.NewUserHandler(userService),
+		handler.NewLiveSessionHandler(liveSessionService),
 		handler.NewHealthHandler(checker, time.Second),
 		cfg.JWTSecret,
 	)

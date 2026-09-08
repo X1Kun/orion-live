@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func New(users *handler.UserHandler, health *handler.HealthHandler, jwtSecret string) *gin.Engine {
+func New(users *handler.UserHandler, liveSessions *handler.LiveSessionHandler, health *handler.HealthHandler, jwtSecret string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.Metrics())
 
@@ -20,10 +20,14 @@ func New(users *handler.UserHandler, health *handler.HealthHandler, jwtSecret st
 	v1 := router.Group("/api/v1")
 	v1.POST("/users/register", users.Register)
 	v1.POST("/users/login", users.Login)
+	v1.GET("/live-sessions/:id", liveSessions.Get)
 
 	protected := v1.Group("")
 	protected.Use(middleware.Auth(jwtSecret))
 	protected.GET("/profile", users.GetProfile)
+	protected.POST("/live-sessions", liveSessions.Create)
+	protected.POST("/live-sessions/:id/start", liveSessions.Start)
+	protected.POST("/live-sessions/:id/end", liveSessions.End)
 
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
