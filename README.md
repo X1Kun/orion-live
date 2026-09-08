@@ -15,10 +15,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Versioned, checksummed MySQL migrations
 - Liveness, readiness, and Prometheus endpoints
 - Graceful HTTP shutdown
+- Authenticated live-session creation and lifecycle management
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-LiveSession, WebSocket chat, messaging topology, reactions, gifts, analytics, and replay APIs will be added in focused increments. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+WebSocket chat, messaging topology, reactions, gifts, analytics, and replay APIs will be added in focused increments. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -56,6 +57,10 @@ Useful endpoints:
 | `POST` | `/api/v1/users/register` | Create an account |
 | `POST` | `/api/v1/users/login` | Obtain an access token |
 | `GET` | `/api/v1/profile` | Validate an access token |
+| `POST` | `/api/v1/live-sessions` | Create a scheduled live session |
+| `GET` | `/api/v1/live-sessions/:id` | Read a live session |
+| `POST` | `/api/v1/live-sessions/:id/start` | Start a scheduled live session |
+| `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
 
 Run the baseline quality gates without starting dependencies:
 
