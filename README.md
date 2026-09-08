@@ -68,6 +68,13 @@ Run the baseline quality gates without starting dependencies:
 make check
 ```
 
+Run the migration and repository integration tests against a dedicated MySQL database:
+
+```bash
+ORION_TEST_MYSQL_DSN='orion:password@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true' \
+  make test-integration
+```
+
 Stop local services without deleting their volumes:
 
 ```bash

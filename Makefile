@@ -1,4 +1,4 @@
-.PHONY: build check compose-config migrate up down logs
+.PHONY: build check test-integration compose-config migrate up down logs
 
 build:
 	go build ./cmd/server ./cmd/migrate
@@ -8,6 +8,10 @@ check:
 	go vet ./...
 	go test ./...
 	go build ./...
+
+test-integration:
+	test -n "$$ORION_TEST_MYSQL_DSN"
+	go test -tags=integration -count=1 ./tests/integration
 
 compose-config:
 	docker compose config --quiet

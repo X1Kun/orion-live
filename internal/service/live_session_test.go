@@ -136,6 +136,19 @@ func TestLiveSessionTransitionDetectsConcurrentChange(t *testing.T) {
 	}
 }
 
+func TestEndLiveSessionDetectsConcurrentChange(t *testing.T) {
+	repository := &liveSessionRepositoryFake{
+		session:      &model.LiveSession{BaseModel: model.BaseModel{ID: 1}, HostUserID: 42, Status: model.LiveSessionStatusLive},
+		forceEndMiss: true,
+	}
+	service := NewLiveSessionService(repository)
+
+	_, err := service.End(context.Background(), 1, 42)
+	if !errors.Is(err, ErrInvalidLiveSessionState) {
+		t.Fatalf("End() error = %v, want %v", err, ErrInvalidLiveSessionState)
+	}
+}
+
 func TestStartLiveSessionRejectsHostWithAnotherLiveSession(t *testing.T) {
 	repository := &liveSessionRepositoryFake{
 		session:    &model.LiveSession{BaseModel: model.BaseModel{ID: 1}, HostUserID: 42, Status: model.LiveSessionStatusScheduled},
