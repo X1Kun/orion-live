@@ -49,6 +49,38 @@ jobs:
       - name: Build container image
         run: docker build --tag orion-live:ci .
 
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4.11
+        env:
+          MYSQL_DATABASE: orion_test
+          MYSQL_USER: orion
+          MYSQL_PASSWORD: ci-only-placeholder
+          MYSQL_ROOT_PASSWORD: ci-only-root-placeholder
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-only-root-placeholder --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Run MySQL integration tests
+        env:
+          ORION_TEST_MYSQL_DSN: "orion:ci-only-placeholder@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true"
+        run: make test-integration
+
   secrets:
     runs-on: ubuntu-latest
     steps:
