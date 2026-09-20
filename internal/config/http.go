@@ -13,7 +13,6 @@ type HTTP struct {
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
 	MaxHeaderBytes    int
 }
 
@@ -34,10 +33,6 @@ func loadHTTP() (HTTP, error) {
 	if err != nil {
 		return HTTP{}, err
 	}
-	shutdownTimeout, err := envDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second)
-	if err != nil {
-		return HTTP{}, err
-	}
 	maxHeaderBytes, err := envInt("HTTP_MAX_HEADER_BYTES", maxHTTPHeaderBytes)
 	if err != nil {
 		return HTTP{}, err
@@ -49,13 +44,12 @@ func loadHTTP() (HTTP, error) {
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
-		ShutdownTimeout:   shutdownTimeout,
 		MaxHeaderBytes:    maxHeaderBytes,
 	}, nil
 }
 
 func (c HTTP) validate() error {
-	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
+	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 {
 		return errors.New("HTTP timeouts must be positive")
 	}
 	if c.MaxHeaderBytes <= 0 || c.MaxHeaderBytes > maxHTTPHeaderBytes {

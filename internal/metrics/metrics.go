@@ -24,4 +24,10 @@ var (
 		},
 		[]string{"path", "method"},
 	)
+
+	// WebSocketConnections tracks currently active WebSocket connections.
+	WebSocketConnections = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orion_websocket_connections",
+		Help: "Current number of active WebSocket connections.",
+	})
 )

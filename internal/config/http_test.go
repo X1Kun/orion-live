@@ -13,7 +13,6 @@ func TestLoadHTTPDefaults(t *testing.T) {
 		"HTTP_READ_TIMEOUT",
 		"HTTP_WRITE_TIMEOUT",
 		"HTTP_IDLE_TIMEOUT",
-		"HTTP_SHUTDOWN_TIMEOUT",
 		"HTTP_MAX_HEADER_BYTES",
 	} {
 		t.Setenv(name, "")
@@ -30,7 +29,6 @@ func TestLoadHTTPDefaults(t *testing.T) {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
-		ShutdownTimeout:   10 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
 	if cfg != want {
@@ -67,7 +65,6 @@ func TestHTTPValidate(t *testing.T) {
 		ReadTimeout:       time.Second,
 		WriteTimeout:      time.Second,
 		IdleTimeout:       time.Second,
-		ShutdownTimeout:   time.Second,
 		MaxHeaderBytes:    maxHTTPHeaderBytes,
 	}
 	if err := valid.validate(); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/X1Kun/orion-live/internal/repository"
 	"github.com/X1Kun/orion-live/internal/router"
 	"github.com/X1Kun/orion-live/internal/service"
+	roomhub "github.com/X1Kun/orion-live/internal/websocket"
 	"github.com/X1Kun/orion-live/pkg/logger"
 	mysqlclient "github.com/X1Kun/orion-live/pkg/mysql"
 	rabbitclient "github.com/X1Kun/orion-live/pkg/rabbitmq"
@@ -61,9 +63,15 @@ func main() {
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
 	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
+	webSocketHub, err := roomhub.NewHub(cfg.WebSocket.RoomBroadcastQueueCapacity)
+	if err != nil {
+		logger.Log.WithError(err).Fatal("initialize WebSocket hub")
+	}
+	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, webSocketHub, cfg.WebSocket)
 	engine := router.New(
 		handler.NewUserHandler(userService),
 		handler.NewLiveSessionHandler(liveSessionService),
+		webSocketHandler,
 		handler.NewHealthHandler(checker, time.Second),
 		cfg.JWTSecret,
 	)
@@ -95,11 +103,24 @@ func main() {
 	}
 
 	checker.SetDraining()
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownTimeout)
+	webSocketHandler.SetDraining()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.ProcessShutdownTimeout)
 	defer cancelShutdown()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Log.WithError(err).Error("graceful shutdown did not complete")
-		_ = server.Close()
-	}
+	var shutdownWG sync.WaitGroup
+	shutdownWG.Add(2)
+	go func() {
+		defer shutdownWG.Done()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Log.WithError(err).Error("HTTP shutdown did not complete")
+			_ = server.Close()
+		}
+	}()
+	go func() {
+		defer shutdownWG.Done()
+		if err := webSocketHandler.Shutdown(shutdownCtx); err != nil {
+			logger.Log.WithError(err).Error("WebSocket shutdown did not complete")
+		}
+	}()
+	shutdownWG.Wait()
 	logger.Log.Info("api server stopped")
 }

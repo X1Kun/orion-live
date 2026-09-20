@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/model"
+	roomhub "github.com/X1Kun/orion-live/internal/websocket"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,9 +24,32 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 			}, nil
 		},
 	}
+	hub, err := roomhub.NewHub(1)
+	if err != nil {
+		t.Fatalf("NewHub() error = %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := hub.Shutdown(ctx); err != nil {
+			t.Errorf("Hub.Shutdown() error = %v", err)
+		}
+	})
+	webSockets := handler.NewWebSocketHandler(liveSessions, hub, config.WebSocket{
+		HandshakeTimeout:           time.Second,
+		WriteTimeout:               time.Second,
+		PongTimeout:                time.Minute,
+		PingInterval:               30 * time.Second,
+		ReadLimitBytes:             4096,
+		ClientSendQueueCapacity:    1,
+		RoomBroadcastQueueCapacity: 1,
+		MaxConnections:             1,
+		MaxConnectionsPerUser:      1,
+	})
 	engine := New(
 		handler.NewUserHandler(&routerUserServiceStub{}),
 		handler.NewLiveSessionHandler(liveSessions),
+		webSockets,
 		handler.NewHealthHandler(routerReadinessCheckerStub{}, 0),
 		"test-secret-with-at-least-32-characters",
 	)
@@ -41,6 +67,7 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/live-sessions"},
 		{method: http.MethodPost, path: "/api/v1/live-sessions/1/start"},
 		{method: http.MethodPost, path: "/api/v1/live-sessions/1/end"},
+		{method: http.MethodGet, path: "/api/v1/live-sessions/1/ws"},
 	}
 	for _, route := range protectedRoutes {
 		response := httptest.NewRecorder()
@@ -83,4 +110,8 @@ func (*routerLiveSessionServiceStub) Start(context.Context, uint64, uint64) (*mo
 
 func (*routerLiveSessionServiceStub) End(context.Context, uint64, uint64) (*model.LiveSession, error) {
 	return nil, nil
+}
+
+func (*routerLiveSessionServiceStub) AuthorizeJoin(context.Context, uint64, uint64) error {
+	return nil
 }

@@ -7,18 +7,24 @@ import (
 )
 
 type Config struct {
-	Environment           string
-	DependencyInitTimeout time.Duration
-	JWTSecret             string
-	AccessTokenTTL        time.Duration
-	HTTP                  HTTP
-	MySQL                 MySQL
-	Redis                 Redis
-	RabbitMQ              RabbitMQ
+	Environment            string
+	DependencyInitTimeout  time.Duration
+	ProcessShutdownTimeout time.Duration
+	JWTSecret              string
+	AccessTokenTTL         time.Duration
+	HTTP                   HTTP
+	WebSocket              WebSocket
+	MySQL                  MySQL
+	Redis                  Redis
+	RabbitMQ               RabbitMQ
 }
 
 func Load() (Config, error) {
 	httpConfig, err := loadHTTP()
+	if err != nil {
+		return Config{}, err
+	}
+	webSocketConfig, err := loadWebSocket()
 	if err != nil {
 		return Config{}, err
 	}
@@ -35,20 +41,26 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	processShutdownTimeout, err := envDuration("PROCESS_SHUTDOWN_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
 	accessTokenTTL, err := envDuration("ACCESS_TOKEN_TTL", 15*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
 
 	cfg := Config{
-		Environment:           env("APP_ENV", "development"),
-		DependencyInitTimeout: dependencyInitTimeout,
-		JWTSecret:             os.Getenv("JWT_SECRET_KEY"),
-		AccessTokenTTL:        accessTokenTTL,
-		HTTP:                  httpConfig,
-		MySQL:                 mysqlConfig,
-		Redis:                 redisConfig,
-		RabbitMQ:              rabbitMQConfig,
+		Environment:            env("APP_ENV", "development"),
+		DependencyInitTimeout:  dependencyInitTimeout,
+		ProcessShutdownTimeout: processShutdownTimeout,
+		JWTSecret:              os.Getenv("JWT_SECRET_KEY"),
+		AccessTokenTTL:         accessTokenTTL,
+		HTTP:                   httpConfig,
+		WebSocket:              webSocketConfig,
+		MySQL:                  mysqlConfig,
+		Redis:                  redisConfig,
+		RabbitMQ:               rabbitMQConfig,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -76,10 +88,16 @@ func (c Config) Validate() error {
 	if c.DependencyInitTimeout <= 0 {
 		return errors.New("DEPENDENCY_INIT_TIMEOUT must be positive")
 	}
+	if c.ProcessShutdownTimeout <= 0 {
+		return errors.New("PROCESS_SHUTDOWN_TIMEOUT must be positive")
+	}
 	if c.AccessTokenTTL <= 0 {
 		return errors.New("ACCESS_TOKEN_TTL must be positive")
 	}
 	if err := c.HTTP.validate(); err != nil {
+		return err
+	}
+	if err := c.WebSocket.validate(); err != nil {
 		return err
 	}
 	if err := c.MySQL.validate(); err != nil {

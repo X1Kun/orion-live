@@ -14,6 +14,7 @@ import (
 
 var (
 	ErrLiveSessionNotFound     = errors.New("live session not found")
+	ErrLiveSessionNotLive      = errors.New("live session is not live")
 	ErrLiveSessionForbidden    = errors.New("only the host can perform this operation")
 	ErrInvalidLiveSessionState = errors.New("live session cannot perform this state transition")
 	ErrHostAlreadyLive         = errors.New("host already has a live session")
@@ -26,6 +27,7 @@ type LiveSessionService interface {
 	Get(ctx context.Context, id uint64) (*model.LiveSession, error)
 	Start(ctx context.Context, id, hostUserID uint64) (*model.LiveSession, error)
 	End(ctx context.Context, id, hostUserID uint64) (*model.LiveSession, error)
+	AuthorizeJoin(ctx context.Context, id, userID uint64) error
 }
 
 type liveSessionService struct {
@@ -111,6 +113,17 @@ func (s *liveSessionService) End(ctx context.Context, id, hostUserID uint64) (*m
 		return nil, ErrInvalidLiveSessionState
 	}
 	return s.Get(ctx, id)
+}
+
+func (s *liveSessionService) AuthorizeJoin(ctx context.Context, id, _ uint64) error {
+	session, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if session.Status != model.LiveSessionStatusLive {
+		return ErrLiveSessionNotLive
+	}
+	return nil
 }
 
 func normalizeCoverURL(value string) (*string, error) {

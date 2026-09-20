@@ -124,6 +124,8 @@ func handleLiveSessionError(c *gin.Context, err error, operation string) {
 		sendError(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 	case errors.Is(err, service.ErrLiveSessionNotFound):
 		sendError(c, http.StatusNotFound, "LIVE_SESSION_NOT_FOUND", "live session not found")
+	case errors.Is(err, service.ErrLiveSessionNotLive):
+		sendError(c, http.StatusConflict, "LIVE_SESSION_NOT_LIVE", "live session is not live")
 	case errors.Is(err, service.ErrLiveSessionForbidden):
 		sendError(c, http.StatusForbidden, "FORBIDDEN", "only the host can perform this operation")
 	case errors.Is(err, service.ErrInvalidLiveSessionState):

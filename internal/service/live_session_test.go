@@ -170,6 +170,27 @@ func TestGetLiveSessionMapsNotFound(t *testing.T) {
 	}
 }
 
+func TestAuthorizeLiveSessionJoin(t *testing.T) {
+	tests := []struct {
+		name    string
+		session *model.LiveSession
+		want    error
+	}{
+		{name: "live", session: &model.LiveSession{BaseModel: model.BaseModel{ID: 1}, Status: model.LiveSessionStatusLive}},
+		{name: "scheduled", session: &model.LiveSession{BaseModel: model.BaseModel{ID: 1}, Status: model.LiveSessionStatusScheduled}, want: ErrLiveSessionNotLive},
+		{name: "ended", session: &model.LiveSession{BaseModel: model.BaseModel{ID: 1}, Status: model.LiveSessionStatusEnded}, want: ErrLiveSessionNotLive},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := NewLiveSessionService(&liveSessionRepositoryFake{session: cloneLiveSession(tt.session)})
+			err := service.AuthorizeJoin(context.Background(), 1, 42)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("AuthorizeJoin() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 type liveSessionRepositoryFake struct {
 	session        *model.LiveSession
 	forceStartMiss bool

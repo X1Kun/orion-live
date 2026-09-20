@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func New(users *handler.UserHandler, liveSessions *handler.LiveSessionHandler, health *handler.HealthHandler, jwtSecret string) *gin.Engine {
+func New(users *handler.UserHandler, liveSessions *handler.LiveSessionHandler, webSockets *handler.WebSocketHandler, health *handler.HealthHandler, jwtSecret string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.Metrics())
 
@@ -28,6 +28,7 @@ func New(users *handler.UserHandler, liveSessions *handler.LiveSessionHandler, h
 	protected.POST("/live-sessions", liveSessions.Create)
 	protected.POST("/live-sessions/:id/start", liveSessions.Start)
 	protected.POST("/live-sessions/:id/end", liveSessions.End)
+	protected.GET("/live-sessions/:id/ws", webSockets.Connect)
 
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
