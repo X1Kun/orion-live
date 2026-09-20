@@ -16,6 +16,7 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Liveness, readiness, and Prometheus endpoints
 - Graceful HTTP shutdown
 - Authenticated live-session creation and lifecycle management
+- Authenticated WebSocket connections to live rooms
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
@@ -61,6 +62,9 @@ Useful endpoints:
 | `GET` | `/api/v1/live-sessions/:id` | Read a live session |
 | `POST` | `/api/v1/live-sessions/:id/start` | Start a scheduled live session |
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
+| `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
+
+The current WebSocket endpoint requires a Bearer token in the upgrade request, accepts only `LIVE` sessions, and is outbound-only until the interaction event protocol is added. Client application messages are closed with WebSocket code `1003`. Connection limits are enforced per API instance; cluster-wide admission is deferred until the Redis degradation policy is implemented.
 
 Run the baseline quality gates without starting dependencies:
 

@@ -119,10 +119,11 @@ func TestLiveSessionHandlerMapsDomainErrors(t *testing.T) {
 }
 
 type liveSessionServiceStub struct {
-	create func(context.Context, uint64, string, string) (*model.LiveSession, error)
-	get    func(context.Context, uint64) (*model.LiveSession, error)
-	start  func(context.Context, uint64, uint64) (*model.LiveSession, error)
-	end    func(context.Context, uint64, uint64) (*model.LiveSession, error)
+	create        func(context.Context, uint64, string, string) (*model.LiveSession, error)
+	get           func(context.Context, uint64) (*model.LiveSession, error)
+	start         func(context.Context, uint64, uint64) (*model.LiveSession, error)
+	end           func(context.Context, uint64, uint64) (*model.LiveSession, error)
+	authorizeJoin func(context.Context, uint64, uint64) error
 }
 
 func (s *liveSessionServiceStub) Create(ctx context.Context, hostUserID uint64, title, coverURL string) (*model.LiveSession, error) {
@@ -142,4 +143,11 @@ func (s *liveSessionServiceStub) Start(ctx context.Context, id, hostUserID uint6
 
 func (s *liveSessionServiceStub) End(ctx context.Context, id, hostUserID uint64) (*model.LiveSession, error) {
 	return s.end(ctx, id, hostUserID)
+}
+
+func (s *liveSessionServiceStub) AuthorizeJoin(ctx context.Context, id, userID uint64) error {
+	if s.authorizeJoin == nil {
+		return nil
+	}
+	return s.authorizeJoin(ctx, id, userID)
 }
