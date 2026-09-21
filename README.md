@@ -2,7 +2,7 @@
 
 A production-oriented Go backend for the interaction plane of a live-streaming product.
 
-Orion Live focuses on authenticated live sessions, reliable WebSocket interaction, durable chat, live reactions, gift-effect comments, replay metadata, and interaction analytics. Media ingestion, transcoding, storage, and CDN delivery remain outside the project.
+Orion Live focuses on authenticated live sessions, bounded WebSocket interaction, reliable RabbitMQ delivery, Transactional Outbox publication, durable chat, Redis admission control, and operational verification. Media delivery and broad product features remain outside the core release.
 
 ## Current status
 
@@ -17,10 +17,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Graceful HTTP shutdown
 - Authenticated live-session creation and lifecycle management
 - Authenticated WebSocket connections to live rooms
+- Versioned interaction events, durable RabbitMQ topology, and confirmed mandatory publication
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-WebSocket chat, messaging topology, reactions, gifts, analytics, and replay APIs will be added in focused increments. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+The per-API realtime subscriber, `live_session.ended` Outbox, persistent Chat, Redis admission, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -64,7 +65,7 @@ Useful endpoints:
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
 | `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
 
-The current WebSocket endpoint requires a Bearer token in the upgrade request, accepts only `LIVE` sessions, and is outbound-only until the interaction event protocol is added. Client application messages are closed with WebSocket code `1003`. Connection limits are enforced per API instance; cluster-wide admission is deferred until the Redis degradation policy is implemented.
+The current WebSocket endpoint requires a Bearer token in the upgrade request, accepts only `LIVE` sessions, and is outbound-only until the interaction event protocol is added. Client application messages are closed with WebSocket code `1003`. Connection limits are enforced per API instance; distributed Chat admission is added in the Redis phase.
 
 Run the baseline quality gates without starting dependencies:
 
@@ -72,10 +73,11 @@ Run the baseline quality gates without starting dependencies:
 make check
 ```
 
-Run the migration and repository integration tests against a dedicated MySQL database:
+Run the infrastructure integration tests against dedicated MySQL and RabbitMQ instances:
 
 ```bash
 ORION_TEST_MYSQL_DSN='orion:password@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true' \
+ORION_TEST_RABBITMQ_URL='amqp://orion:password@127.0.0.1:5672/' \
   make test-integration
 ```
 

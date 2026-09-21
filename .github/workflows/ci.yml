@@ -66,6 +66,18 @@ jobs:
           --health-interval=5s
           --health-timeout=3s
           --health-retries=60
+      rabbitmq:
+        image: rabbitmq:4.3.5-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: orion
+          RABBITMQ_DEFAULT_PASS: ci-only-placeholder
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -76,9 +88,10 @@ jobs:
           go-version: "1.24.x"
           cache: true
 
-      - name: Run MySQL integration tests
+      - name: Run integration tests
         env:
           ORION_TEST_MYSQL_DSN: "orion:ci-only-placeholder@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true"
+          ORION_TEST_RABBITMQ_URL: "amqp://orion:ci-only-placeholder@127.0.0.1:5672/"
         run: make test-integration
 
   secrets:

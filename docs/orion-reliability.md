@@ -2,129 +2,156 @@
 
 ## 1. Project Purpose
 
-Orion-Live is a reliable Go backend for the interaction plane of a live-streaming product. It provides authenticated live sessions, persistent WebSocket chat, live reactions, gift-effect comments, replay metadata, replay feeds, and replay comments.
+Orion Live is a production-oriented Go backend for the interaction plane of a live-streaming product. Its core purpose is to demonstrate and verify reliable real-time delivery across authenticated WebSocket connections, MySQL, RabbitMQ, and Redis.
 
-The system is designed to provide:
+The core release focuses on:
 
-- Low-latency interaction for connected users
-- Durable chat history with eventual persistence
-- Reliable event distribution to real-time delivery, persistence, and analytics
-- Strong consistency for limited gift-effect credits
-- Bounded behavior during dependency failures and traffic bursts
-- Automatic recovery after API, Worker, MySQL, Redis, or single RabbitMQ broker process restarts
-- End-to-end observability across synchronous and asynchronous paths
+- Authenticated live-session lifecycle management
+- Bounded WebSocket connection and room ownership
+- Reliable cross-instance event delivery
+- Transactional publication of `live_session.ended`
+- Durable chat with asynchronous MySQL persistence
+- Idempotent message consumption and history recovery
+- Distributed rate limiting with explicit failure behavior
+- Operational metrics, graceful shutdown, deployment, and failure testing
 
-Media ingestion, transcoding, live audio/video transmission, storage, and CDN delivery belong to the media plane and are outside this system.
+Media ingestion, transcoding, live audio/video transmission, storage, CDN delivery, and payment processing remain outside Orion Live.
 
-## 2. Terminology
+The project intentionally favors one complete, measurable interaction path over broad product coverage. Replay products, a full gift system, business dashboards, and speculative cache layers are deferred until the core path is verified.
+
+## 2. Delivery Scope
+
+### Core release
+
+| Capability | Required behavior |
+| --- | --- |
+| Authentication | Register, log in, validate short-lived JWTs, and protect HTTP and WebSocket endpoints. |
+| Live sessions | Create, read, start, and end `LiveSession` records through guarded state transitions. |
+| WebSocket rooms | Admit authenticated users only to `LIVE` sessions with bounded per-instance and per-user connections. |
+| Messaging | Route versioned interaction events through RabbitMQ with confirms, mandatory routing, reconnection, retry, and DLQ isolation. |
+| Session-ended Outbox | Commit `LIVE → ENDED` and `live_session.ended` in one MySQL transaction, then publish asynchronously. |
+| Persistent chat | Confirm accepted messages through RabbitMQ, broadcast them across API instances, and persist them idempotently. |
+| Chat history | Provide cursor-based history for room entry and bounded reconnect reconciliation. |
+| Rate limiting | Enforce distributed Chat admission through Redis and fail closed when the limiter cannot provide a safe answer. |
+| Operations | Expose bounded-cardinality metrics, structured logs, health signals, graceful shutdown, and repeatable failure evidence. |
+| Deployment exercise | Run at least two API replicas and a Worker in one container orchestration environment with probes, resource bounds, and graceful rollout settings. |
+
+### Optional extensions
+
+After the core release is verified, choose at most one optional extension when additional depth is useful:
+
+| Extension | Learning value |
+| --- | --- |
+| Live reactions | Reuse the event path for non-retrying client intent and eventually consistent aggregation. |
+| Gift-effect credits | Demonstrate row locks, bounded transaction retry, credit consumption, and Transactional Outbox consistency. |
+
+### Deferred product work
+
+- Replay metadata, feeds, callbacks, and replay comments
+- A complete gift-provider integration and payment-related workflow
+- Live Interaction Insights and a business analytics API
+- Redis read caching, request coalescing, database fallback circuits, and local degraded rate limiting
+- Multiple optional interaction types solely to increase feature count
+
+## 3. Terminology
 
 | Term | Meaning |
 | --- | --- |
-| Interaction plane | User interaction APIs and event processing surrounding media delivery. |
-| Interaction event | A versioned record such as a chat message, live reaction, gift, or gift-effect comment. |
-| Eventual consistency | Stores or views may temporarily disagree but converge asynchronously. |
-| Idempotency key | Stable identity that makes repeated execution produce one logical effect. |
-| User ID | The authenticated account identity obtained from the validated JWT. Clients do not choose or override it in message payloads. |
-| Message ID | A UUIDv4 created by the client for one logical chat send. A retry reuses it; a new send creates a new one. `(live_session_id, user_id, message_id)` uniquely identifies a chat message; the ID has no ordering semantics. |
-| Event ID | A stable identity for one event occurrence. For a chat event it is derived from `(event_type, live_session_id, user_id, message_id)` and is reused across publication and delivery retries. |
-| Accepted at | The UTC server time captured once after admission checks and before initial publication. For chat events it is carried downstream unchanged as `occurred_at`; it provides approximate event time, not a global sequence. |
-| History cursor | The auto-increment MySQL row ID assigned when a chat message is persisted. It supports stable history pagination and is not a per-client sequence or message identity. |
-| RabbitMQ broker node | One RabbitMQ server process. Multiple API instances and multiple logical queues do not imply multiple broker nodes. |
-| Durable queue | A queue definition that survives a broker restart. Its messages survive only when they are also published as persistent and broker storage is retained. |
-| Quorum queue | One logical queue whose log is replicated across RabbitMQ cluster nodes and committed by a majority. A single-member quorum queue provides no node-level failover. |
-| Publisher confirm | RabbitMQ acknowledgement that the broker accepted responsibility for a publication. |
-| Mandatory routing | RabbitMQ returns a publication that cannot be routed to any queue; it proves at-least-one-queue routing, not delivery to every intended queue. |
-| Consumer acknowledgement | Confirmation sent only after a Consumer has completed its required processing. |
-| Transactional outbox | A database pattern that commits business data and a pending event in one local transaction. |
-| Inbox | A Consumer-side record keyed by `(consumer_name, event_id)` that prevents duplicate effects while allowing independent Consumers to process the same event. |
+| Interaction event | A versioned record distributed through RabbitMQ, such as `live_session.ended` or `chat.message.accepted`. |
+| User ID | The authenticated account identity obtained from the validated JWT. Clients cannot override it in message payloads. |
+| Message ID | A UUIDv4 created by the client for one logical Chat send. Retries reuse it. |
+| Event ID | A stable identity for one event occurrence and all of its publication or delivery retries. |
+| Correlation ID | The identity of one request or workflow execution across API, Publisher, and Consumer logs. It is not a deduplication key or Prometheus label. |
+| Chat business key | `(live_session_id, user_id, message_id)`, which protects domain uniqueness independently of event delivery identity. |
+| Accepted at | The UTC server time captured once after admission and preserved as the source event time. |
+| History cursor | The auto-increment MySQL row ID used for stable Chat history pagination. It is not a message identity. |
+| Publisher Confirm | RabbitMQ acknowledgement that the broker accepted responsibility for a publication. |
+| Mandatory routing | RabbitMQ return behavior for a publication that did not reach any queue. It does not prove every required binding received the event. |
+| Transactional Outbox | A database record committed atomically with a business mutation and published later. |
+| Inbox | A Consumer-side record keyed by `(consumer_name, event_id)` that prevents duplicate business effects. |
+| Send gate | Process-local admission state that rejects new client interaction frames when a session or messaging invariant is unavailable. |
 | Poison message | Input that repeatedly fails for a deterministic reason. |
-| Dead-letter queue | Queue that isolates messages after their retry budget is exhausted. |
-| Bounded degradation | Partial fallback with explicit limits that protect downstream dependencies. |
-| Fail closed | Reject an operation when a dependency required for correctness or traffic safety is unavailable. |
-| Token bucket | A rate limiter that replenishes tokens at a fixed rate and permits a bounded burst up to the bucket capacity. |
-| Live reaction | A transient append-only interaction of type `LIKE`, `HEART`, `CLAP`, or `FIRE`; it is broadcast immediately and stored only as an aggregate. |
-| Gift-effect grant | A time-bounded grant that allows the gift sender to publish a fixed number of visually enhanced comments. |
-| Replay metadata | Business metadata for a recorded live session, including title, cover, playback URL, duration, availability, and source session. Media bytes remain outside Orion-Live. |
+| Dead-letter queue | A queue that isolates messages after their retry budget is exhausted. |
+| Fail closed | Refuse a new interaction when the dependency needed to make a safe admission decision is unavailable. |
 
-## 3. System Features
-
-| Feature | Behavior |
-| --- | --- |
-| Authentication | Register, log in, validate JWTs, and authorize protected HTTP and WebSocket endpoints. |
-| Live sessions | Create and manage a live session with host, title, cover, status, and start/end timestamps. |
-| Persistent WebSocket chat | Validate and rate-limit chat, publish it reliably, broadcast it to the room, and persist it asynchronously. |
-| Recent room context | Let joining users read recent messages and reconnecting users recover messages missed during a short network gap. |
-| Live reactions | Let viewers send `LIKE`, `HEART`, `CLAP`, or `FIRE` reactions for real-time animation and per-type aggregation. |
-| Gifts | Accept a trusted gift result and create a time-bounded gift-effect grant. Payment processing remains external. |
-| Gift-effect comments | Let the gift sender use a fixed number of visual-effect comments through an atomic MySQL transaction. |
-| Interaction analytics | Maintain eventually consistent per-session and per-minute aggregates without blocking user requests. |
-| Live interaction insights | Expose chat, reaction-by-type, gift, and peak-activity aggregates through a read API for hosts and operations. |
-| Replay metadata | Create processing metadata when a live session ends, accept a trusted final media result, and expose available playback metadata without storing or transcoding media. |
-| Replay feed | Return paginated replay metadata for completed live sessions. |
-| Replay comments | Persist comments synchronously when the client requires an immediate database ID. |
-
-## 4. System Architecture
+## 4. Core Architecture
 
 ```text
 HTTP / WebSocket Clients
            │
            ▼
-┌───────────────────────────┐       rate limits / cache       ┌───────┐
-│        API Server         │◀───────────────────────────────▶│ Redis │
-│ auth / live / replay / WS │                                └───────┘
+┌───────────────────────────┐       rate limit       ┌───────┐
+│        API Server         │◀──────────────────────▶│ Redis │
+│ auth / live / WS / chat   │                       └───────┘
 └────────┬─────────┬────────┘
          │         │
-         │         └── synchronous business transaction ──▶ MySQL
-         │                                                       │
-         │ direct chat/reaction publication                      │ pending Outbox events
-         │                                                       ▼
-         │                                                Outbox Publisher
-         │                                                       │
-         └───────────────────────┬───────────────────────────────┘
-                                 ▼
-                    ┌────────────────────────┐
-                    │   RabbitMQ Interaction │
-                    │        Exchange        │
-                    └───────┬───────┬────────┘
-                            │       │
-             ┌──────────────┘       └─────────────────┐
-             ▼                                        ▼
-    per-API realtime queue                    Persistence Queue
-             │                                  │           │
-             ▼                                  ▼           └─▶ Persistence Retry ─▶ Persistence DLQ
-    Realtime Subscriber                 Persistence Consumer
-             │                                  │
-             ▼                                  ▼
-    WebSocket Hub / Rooms                      MySQL
-
-                    Exchange ──▶ Analytics Queue
-                                      │          │
-                                      ▼          └─▶ Analytics Retry ─▶ Analytics DLQ
-                              Analytics Consumer ──▶ MySQL
+         │         └── live-session transaction ──▶ MySQL
+         │                                                │
+         │ direct confirmed Chat publish                  │ pending Outbox
+         │                                                ▼
+         │                                         Outbox Publisher
+         │                                                │
+         └──────────────────┬─────────────────────────────┘
+                            ▼
+                 ┌────────────────────────┐
+                 │   RabbitMQ Interaction │
+                 │        Exchange        │
+                 └────────┬───────────────┘
+                          │
+             ┌────────────┴────────────────────┐
+             ▼                                 ▼
+    per-API realtime queue            Persistence Queue
+             │                                 │
+             ▼                                 ├─▶ Retry Queue
+    Realtime Subscriber                        └─▶ DLQ
+             │                                 │
+             ▼                                 ▼
+    WebSocket Hub / Rooms             Persistence Consumer
+                                               │
+                                               ▼
+                                             MySQL
 
 All processes ──▶ Prometheus metrics + structured logs
 ```
+
+The baseline deployment uses one RabbitMQ broker node. Durable queues and retained broker storage survive a broker process or container restart, but do not provide broker-host or disk failover.
 
 ### Component responsibilities
 
 | Component | Responsibility |
 | --- | --- |
-| API Server | Authentication, validation, traffic admission, synchronous business transactions, WebSocket lifecycle, and direct chat/reaction publication. |
-| WebSocket Hub | Own in-memory rooms and deliver typed interaction events to locally connected clients. |
-| Topology Initializer and Auditor | Declare shared RabbitMQ topology with separate privileges, verify required bindings, and close affected send gates when an invariant fails. |
-| Outbox Publisher | Lease committed events, publish with confirms, and use a fenced claim token for state changes and bounded retry. |
-| Persistence Consumer | Persist the first committed Chat value, suppress equal duplicates, and audit conflicting payload hashes without blocking WebSocket ingestion. |
-| Analytics Consumer | Update business aggregates idempotently without blocking interaction requests. |
-| MySQL | Source of truth for users, sessions, replay metadata, chat history, gift grants, gift-effect comments, outbox events, inbox records, and interaction aggregates. |
-| Redis | Distributed rate limiting, read cache, and request coalescing support. It is not authoritative for gift credits. |
-| RabbitMQ | On the baseline single broker node, buffer and route interaction events to independent real-time, persistence, and analytics paths with acknowledgement and isolated failure handling. |
-| External gift system | Produces a trusted gift result; payment and financial correctness are outside Orion-Live. |
-| External media plane | Produces the recording and playback URL after a live session ends. |
-| Prometheus and structured logs | Operational metrics, health signals, correlation, and failure diagnosis. Prometheus is not the business analytics store. |
+| API Server | Authentication, validation, LiveSession mutations, WebSocket lifecycle, admission, and direct Chat publication. |
+| WebSocket Hub | Own process-local Rooms, bounded Client queues, slow-client removal, and graceful connection shutdown. |
+| Topology Initializer | Declare the exchange, durable processing queue, retry queue, DLQ, and required bindings idempotently. |
+| Realtime Subscriber | Consume the API instance's ephemeral queue and deliver events to local Rooms. |
+| Outbox Publisher | Lease committed events, publish with confirms, and use a claim token to fence stale publishers. |
+| Persistence Consumer | Persist Chat idempotently and acknowledge only after its local transaction commits. |
+| MySQL | Authoritative store for users, sessions, Chat history, Outbox, and Inbox records. |
+| Redis | Distributed interaction admission. It is not an authoritative store for durable business data. |
+| RabbitMQ | Buffer and route events independently to real-time delivery and persistence. |
 
 ## 5. Key Design
 
-### 5.1 Interaction event contract and RabbitMQ topology
+### 5.1 LiveSession and WebSocket lifecycle
+
+```text
+LiveSession(SCHEDULED)
+→ LiveSession(LIVE)
+→ LiveSession(ENDED)
+```
+
+- One host may schedule multiple sessions but may have only one `LIVE` session at a time.
+- State transitions use conditional MySQL updates so concurrent Start or End requests produce one successful transition.
+- WebSocket upgrades require a valid JWT and a `LIVE` session before the server allocates a connection.
+- Each API instance enforces a global connection limit and a per-user limit before Upgrade.
+- One process-local Room is keyed by `live_session_id`; it is not another business entity.
+- One Client represents one physical WebSocket lifetime and belongs to at most one Room.
+- The Hub uses bounded Room and Client queues. Slow Clients are disconnected without blocking a Room.
+- Process shutdown stops new admission, closes HTTP and WebSocket workloads concurrently, and waits within one process-level deadline.
+
+Ending a session has a weak distributed cutoff for high-volume interactions. An API rejects new frames after observing `ENDED`, while an already accepted tail event remains valid and is never retracted.
+
+### 5.2 Interaction event contract and RabbitMQ topology
 
 Every event uses a versioned envelope:
 
@@ -133,272 +160,169 @@ event_id
 event_type
 schema_version
 correlation_id
-idempotency_key
-request_hash
 user_id
 live_session_id
 occurred_at
 payload
 ```
 
-The topic exchange routes events by type:
+- `event_id` identifies one logical event and is reused by every publication retry and Broker redelivery.
+- Consumer Inbox deduplication uses `(consumer_name, event_id)`.
+- Chat domain deduplication separately uses `(live_session_id, user_id, message_id)`, protecting against a Producer bug that emits two Event IDs for one logical message.
+- The generic envelope does not carry a second idempotency key or a producer-supplied request hash.
+- Chat payload conflicts are classified by comparing the stored canonical business fields with the incoming payload after a business-key conflict.
+- `correlation_id` connects logs and future trace context. It does not participate in uniqueness or metrics labels.
+
+Core routing keys:
 
 ```text
 orion.interaction.events
-├─ chat.message.accepted
-├─ reaction.created
-├─ gift.sent
 ├─ live_session.ended
-└─ gift_effect_comment.created
+└─ chat.message.accepted
 ```
 
-The baseline deployment uses one RabbitMQ broker node even when multiple API instances are running:
+Optional extensions may add `reaction.created`, `gift.sent`, or `gift_effect_comment.created` without changing the core envelope.
+
+The core topology contains:
 
 ```text
 one RabbitMQ broker node
 └─ orion.interaction.events
-   ├─ one exclusive, auto-delete real-time queue per API instance
-   ├─ one shared durable Persistence Queue
-   │  └─ dedicated Persistence Retry Queue and Persistence DLQ
-   └─ one shared durable Analytics Queue
-      └─ dedicated Analytics Retry Queue and Analytics DLQ
+   ├─ one exclusive, auto-delete realtime queue per API instance
+   └─ one shared durable Persistence Queue
+      ├─ dedicated delayed Retry Queue
+      └─ dedicated DLQ
 ```
 
-- API instance count, logical queue count, and RabbitMQ broker-node count are independent deployment dimensions.
-- Each API instance creates its own real-time queue and broadcasts matching events only to WebSocket clients connected to that instance. This queue is best effort and has no retry queue or DLQ.
-- Persistence Consumer replicas compete on the shared Persistence Queue; Analytics Consumer replicas compete independently on the shared Analytics Queue.
-- A topology initializer uses separate credentials with shared-topology `configure` permission to declare the exchange, durable queues, retry queues, DLQs, and bindings idempotently. Runtime publishers and durable Consumers cannot modify shared topology.
-- Each API instance may configure only its own namespaced real-time queue and has publish permission plus read access to that queue; durable Consumers have read access only to their assigned shared queues.
-- Persistence and Analytics use separate retry queues and DLQs because they have different retry policies, operational impact, and redrive procedures.
-- The baseline uses durable classic queues, persistent messages, publisher confirms, and retained broker storage. This survives a RabbitMQ process or container restart, but not permanent loss of the broker host or disk.
-- A future three-node RabbitMQ cluster may migrate durable processing queues to Quorum Queues for broker-node failover. A single-node deployment must not claim quorum-based high availability.
-- Messages use stable IDs, persistent delivery, publisher confirms, and mandatory routing checks.
-- Mandatory routing proves only that an event reached at least one queue; Publisher Confirm and mandatory routing do not independently prove delivery to the Persistence Queue.
-- Startup and periodic topology audits validate required queues and bindings through access-controlled management credentials. A missing required binding triggers an alert, marks messaging readiness unhealthy, and closes the Chat/Reaction send gate until the topology is restored.
-- Consumers acknowledge only after their local database transaction commits.
-- Retryable Persistence and Analytics failures enter their own delayed retry queue with a bounded attempt count.
-- Deterministic failures and exhausted messages enter the DLQ belonging to that processing path.
-- Consumers use a unique business key or Inbox record to prevent duplicate effects.
-- Reconnection recreates channels, QoS, publishers, and Consumers with exponential backoff and jitter. The topology initializer restores shared topology; runtime processes only validate it and recreate their permitted per-instance real-time queues.
+- API instance count, logical queue count, and broker-node count are independent deployment dimensions.
+- Realtime delivery is best effort. Each API instance owns a queue for only its locally connected Clients.
+- Realtime queues bind `live_session.ended` and `chat.message.accepted`.
+- The Persistence Queue binds `chat.message.accepted`; `live_session.ended` remains authoritative in the LiveSession table and Outbox.
+- Persistence Consumer replicas compete on the shared durable queue.
+- Durable processing messages use persistent delivery mode.
+- Publishers wait for Confirm and enable mandatory routing.
+- The API send gate opens only after required topology validation succeeds.
+- Connections, channels, QoS, publishers, and Consumers are recreated with exponential backoff and jitter.
+- Orion uses one recovery owner: the application Client recreates connections, while Publisher and Consumer components recreate their channels. The experimental `amqp091-go` automatic Recovery mechanism remains disabled to avoid overlapping recovery state machines.
+- Consumer acknowledgements occur only after processing succeeds or an idempotent duplicate is proven safe.
+- Retryable failures enter the delayed retry queue with a bounded attempt count. Deterministic and exhausted failures enter the DLQ.
 
-### 5.2 Ordinary chat pipeline
+Mandatory routing proves that at least one queue matched. It does not independently prove that every required queue was bound, so startup and periodic topology validation remain explicit reliability checks.
+
+The self-contained development topology declares retry TTL and dead-letter routing through queue `x-arguments`. Before a stable deployed queue becomes operational data, mutable TTL, DLX, and length settings move to RabbitMQ Policy managed by deployment IaC. Policies are not configured through the runtime AMQP identity.
+
+### 5.3 `live_session.ended` Transactional Outbox
+
+The first transactional event is `live_session.ended`:
 
 ```text
-WebSocket message with a client-generated `message_id`
-→ authenticate the connection and obtain `user_id` from its JWT
-→ validate input and apply Redis rate limits
-→ capture `accepted_at = time.Now().UTC()` once
-→ derive a stable `event_id` from (`chat.message.accepted`, `live_session_id`, `user_id`, `message_id`)
-→ compute `request_hash` from the canonical message payload
-→ publish `chat.message.accepted` with `occurred_at = accepted_at`
+BEGIN
+  require current status = LIVE
+  capture database UTC ended_at once
+  update LiveSession to ENDED using that timestamp
+  insert live_session.ended Outbox event with the same occurred_at
+COMMIT
+```
+
+- The state transition and event either commit together or both fail.
+- The HTTP response succeeds after the MySQL transaction commits; RabbitMQ availability does not decide whether End is durable.
+- Outbox records contain `status`, `available_at`, `claimed_by`, `claim_token`, `lease_until`, `attempt_count`, `last_error`, and `published_at`.
+- A Publisher claims a bounded batch and commits the lease before network publication.
+- Publisher Confirm marks an event `PUBLISHED` only when both `event_id` and the current `claim_token` match.
+- A lease expiry may cause duplicate publication, so downstream Consumers use stable `event_id` values and idempotent processing.
+- Publication retries use bounded exponential backoff. Deterministic and exhausted failures enter `FAILED` for alerting and controlled recovery.
+
+The realtime subscriber uses `live_session.ended` to close the local send gate and notify connected Clients. MySQL remains authoritative: a restarted API has no old in-memory Room, and every new WebSocket admission checks the current session state even if that process missed the event.
+
+### 5.4 Ordinary Chat pipeline
+
+```text
+WebSocket chat.send with client-generated message_id
+→ obtain user_id from the authenticated connection
+→ validate frame and apply Redis admission
+→ capture accepted_at once in UTC
+→ derive stable event_id
+→ publish chat.message.accepted
 → verify routing and wait for Publisher Confirm
-→ return `chat.ack` containing `message_id` and status `accepted`
-→ Realtime Subscriber broadcasts to online clients
-→ Persistence Consumer inserts the message idempotently
-→ Analytics Consumer updates aggregates idempotently
+→ return chat.ack(status = accepted)
+→ Realtime Subscriber broadcasts to local Rooms
+→ Persistence Consumer writes MySQL idempotently
 ```
 
-- The client creates a new UUIDv4 `message_id` for each deliberate send and reuses the same ID only when retrying that send.
-- The API never accepts `user_id` from the chat payload. It obtains `user_id` from the authenticated WebSocket connection.
-- `(live_session_id, user_id, message_id)` is the chat business key and has a MySQL unique constraint. The session scope prevents accidental ID reuse in one room from conflicting with another room.
-- Ordinary Chat is published directly to RabbitMQ and does not use an API-side Outbox or synchronous MySQL idempotency reservation. Its latency and buffering model intentionally differs from transactional Gift-effect comments.
-- Chat `request_hash` covers canonical client-controlled meaning such as `live_session_id` and content; it excludes retry-varying server metadata such as `accepted_at`, `correlation_id`, and publication attempt details.
-- Repeated publication of the same logical send produces the same `event_id`, allowing real-time clients and durable Consumer Inboxes to suppress duplicate effects.
-- The Persistence Consumer stores `request_hash` with the message. The first `(live_session_id, user_id, message_id)` value committed to MySQL becomes authoritative; the system does not promise which of two concurrently accepted conflicting payloads wins.
-- The same business key and hash is a normal duplicate and is acknowledged without another effect. The same key with a different hash is a protocol violation: the Consumer preserves the stored message, records a conflict audit and metric, and acknowledges the conflict without sending it through an automatic redrive loop.
-- Real-time copies are provisional. Concurrent invalid payloads may be observed in different orders across per-API real-time queues; subsequent history reconciliation replaces them with the authoritative MySQL value. A second Chat ACK never means that an existing message was edited.
-- `message_id` identifies a message but never determines message order. UUIDv7, Redis `INCR`, and a central sequence service are unnecessary for this consistency model.
-- The API creates one immutable event for a publication attempt. Publisher retries reuse its original `event_id` and `accepted_at` instead of calling the clock again.
-- Realtime, Persistence, and Analytics Consumers preserve the source `occurred_at`. They may record separate `processed_at` or `persisted_at` timestamps for latency measurement but never replace the event time.
-- A duplicate client request may reach another API instance after an acknowledgement is lost. The first event persisted for the business key defines the stored `accepted_at`; duplicate events cannot overwrite it.
-- RabbitMQ acceptance is the asynchronous Chat acceptance boundary only while the access-controlled topology has passed its required-binding checks. This guarantee is conditional on that deployment invariant.
-- If reliable publication cannot be confirmed, the server reports failure and does not claim that the message was accepted.
-- Persistence and analytics failures do not block WebSocket ingestion; they use bounded retry and DLQ handling.
-- `chat_messages.id` is an auto-increment history cursor created only when MySQL persistence completes; it is separate from the client-generated `message_id`.
-- History queries use `WHERE live_session_id = ? AND id > ? ORDER BY id LIMIT ?` and return the last row ID as `next_cursor`. The client keeps this cursor locally; the server does not maintain one sequence per client.
-- Joining clients fetch recent room context. Reconnecting clients query after their last cursor and merge results by `(live_session_id, user_id, message_id)` so that WebSocket and HTTP copies are displayed once.
-- Because real-time and persistence queues are consumed independently, an immediate history query may not contain a message already seen in real time. During a default five-second recovery window, the client repeats `after_cursor` queries after approximately 250 ms, 500 ms, one second, and two seconds, and merges results by business key.
-- Without a persistence watermark, a finite reconnect procedure cannot prove that it has obtained every accepted message. Messages persisted after that window are eventually discoverable on a later history refresh or room entry; the system does not claim bounded-complete recovery.
-- Clients display approximate chronological order using `accepted_at`, with `(live_session_id, user_id, message_id)` as a deterministic tie-breaker. Cursor order is stable MySQL insertion order, not strict send-time order across API instances.
-- Real-time delivery remains best effort: disconnected or slow clients may miss the live broadcast even though the message is persisted later.
+- `(live_session_id, user_id, message_id)` uniquely identifies a Chat message.
+- A deliberate retry reuses `message_id`; a new send creates a new UUIDv4.
+- The API never accepts `user_id` from the frame payload.
+- Publication retries reuse the original `event_id` and `accepted_at`.
+- Ordinary Chat publishes directly to RabbitMQ. It does not create an API-side Outbox row.
+- Success is returned only after confirmed, routable publication while the required topology is healthy.
+- A duplicate business key with the same canonical content has no additional effect.
+- A duplicate business key with different canonical content preserves the first committed value, records a conflict metric and audit log, and does not enter an automatic retry loop.
+- Realtime delivery is provisional. Persisted history is authoritative after reconciliation.
 
-### 5.3 Live reactions
+History queries use:
 
-```text
-WebSocket reaction (`LIKE`, `HEART`, `CLAP`, or `FIRE`)
-→ validate the type and apply Redis user/room rate limits
-→ publish `reaction.created`
-→ Realtime Subscriber broadcasts the visual effect
-→ Analytics Consumer increments the matching minute/type bucket
+```sql
+WHERE live_session_id = ? AND id > ?
+ORDER BY id
+LIMIT ?
 ```
 
-- Each click creates a new append-only event rather than mutating a per-user reaction state.
-- Reaction uses deliberately non-idempotent client-intent semantics: every admitted WebSocket frame is a new Reaction intent and a successful publication creates one event. There is no client `reaction_id`, application-level ACK, or automatic client retry.
-- TCP/WebSocket transport retransmission is transparent to the application. A client that sends another application frame, whether through another click, a bug, or abuse, creates another Reaction and is controlled by user/room Token Buckets.
-- The API generates a fresh `event_id` for each received frame. Retries of that frame's RabbitMQ publication reuse the same `event_id`, so broker redelivery remains idempotent in the Analytics Inbox.
-- Raw reaction events are not stored as permanent MySQL history.
-- MySQL stores aggregates keyed by `(live_session_id, minute_bucket, reaction_type)`.
-- The Analytics Consumer uses the shared Inbox policy in Section 5.5 to deduplicate RabbitMQ redelivery; this does not change the non-retrying client-intent semantics above.
-- Real-time animation is best effort; aggregate statistics are eventually consistent.
+Joining Clients fetch recent context. Reconnecting Clients query after their last cursor several times within a bounded recovery window and merge WebSocket and HTTP copies by `(live_session_id, user_id, message_id)`.
 
-### 5.4 Gift-effect comments
+A finite recovery window cannot prove completeness without a persistence watermark. Later history refreshes may discover messages that persisted after the window.
 
-A trusted gift result creates a grant for the gift sender:
+### 5.5 Consumer Inbox and retry behavior
 
-```text
-GiftEffectGrant
-├─ grant_id
-├─ provider_gift_id
-├─ provider_request_hash
-├─ live_session_id
-├─ user_id
-├─ total_credits
-├─ remaining_credits
-├─ expires_at
-└─ status
-```
+- Durable Consumers store `UNIQUE(consumer_name, event_id)` Inbox records.
+- The Inbox insert and business mutation commit in the same MySQL transaction.
+- A duplicate Inbox key skips repeated business work and is acknowledged safely.
+- Retry and DLQ redrive preserve the original event identity, source time, idempotency key, and business identifiers.
+- Automatic retry and supported redrive durations are bounded.
+- Inbox retention must outlive every supported automatic retry or redrive window.
+- Poison messages cannot block healthy queue traffic indefinitely.
 
-Each confirmed gift creates one grant. The user sees an aggregate balance, while consumption selects the active grant with the earliest `(expires_at, grant_id)`:
+The system provides at-least-once delivery with one logical database effect, not exactly-once delivery.
 
-```text
-Request with client-generated `message_id`
-→ MySQL transaction
-   ├─ return the original comment for an identical `(live_session_id, user_id, message_id)` retry
-   ├─ return 409 when the same key is reused with a different request hash
-   ├─ lock the LiveSession and require status `LIVE`
-   ├─ select the earliest-expiring eligible grant using database UTC time and `SELECT ... FOR UPDATE`
-   ├─ atomically decrement `remaining_credits`
-   ├─ insert the gift-effect comment
-   └─ insert `gift_effect_comment.created` into the Outbox
-→ commit
-→ return the comment and updated credit summary
-→ Outbox Publisher sends the event
-→ real-time delivery and analytics process it independently
-```
+### 5.6 Redis admission and failure behavior
 
-- `provider_gift_id` is unique. An identical notification hash returns the existing result; reuse with a different user, session, gift, or credit payload returns `409`, leaves the Grant unchanged, and raises a security alert.
-- Grant creation and its `gift.sent` Outbox event commit in one transaction.
-- The credit read API returns `available_credits`, `next_expires_at`, and `next_expiring_credits` from indexed active grants. A separate balance table or Redis balance cache is added only if measurements justify it.
-- Credit summaries are snapshots near transaction commit. Concurrent requests may immediately consume more credits, so the API does not promise that a returned balance remains unchanged.
-- Gift-effect request hashes cover canonical behavior-changing input such as `live_session_id`, comment content, and a client-selectable effect type. A server-derived effect is excluded from the request payload and hash.
-- Gift-effect comments use the same session-scoped `(live_session_id, user_id, message_id)` business identity as ordinary Chat, while retaining their stronger synchronous transaction semantics.
-- Grant eligibility includes `status = 'ACTIVE'`, `remaining_credits > 0`, and `expires_at > UTC_TIMESTAMP(6)` in the locking query. The selection index is `(user_id, live_session_id, status, expires_at, grant_id)`.
-- New Gift-effect mutations lock `LiveSession` before Grant rows. The ending transaction follows the same order, giving Gift comments a strict cutoff: either the comment commits while the session is `LIVE`, or it observes `ENDED` and consumes no credit.
-- Deadlocks and lock-wait timeouts retry the complete transaction at most three times with jitter while preserving the same `(live_session_id, user_id, message_id)`.
-- MySQL is authoritative for the grant; Redis does not reserve or compensate credits.
-- Credit consumption, comment creation, and Outbox insertion succeed or fail together.
-- The API returns success only after the MySQL transaction commits.
-- A RabbitMQ outage delays downstream broadcast and analytics but cannot erase a committed comment.
-- Payment processing, refunds, and financial ledger correctness remain outside this project.
+- Redis Lua scripts atomically enforce distributed token buckets for Chat users and Rooms.
+- Redis operations use a short deadline so WebSocket goroutines do not block on a degraded dependency.
+- Exceeding a healthy rate limit returns `429`.
+- If Redis cannot make a safe admission decision, new Chat sends return `503`.
+- Established WebSocket connections remain available for receiving events.
+- Redis recovery probes restore Chat admission automatically.
+- MySQL and RabbitMQ remain authoritative for durable state and accepted events.
 
-### 5.5 Transactional Outbox and Consumer Inbox
+The first release deliberately omits local in-memory degradation, `MAX_API_REPLICAS` budget division, read caching, cache invalidation, request coalescing, and database fallback circuits. Those features require measured load or availability requirements before implementation.
 
-- The API writes business data and a `PENDING` Outbox event in one MySQL transaction.
-- Outbox records include `status`, `available_at`, `claimed_by`, a unique per-claim `claim_token`, `lease_until`, `attempt_count`, `last_error`, `published_at`, and timestamps.
-- Publisher instances claim eligible records with a bounded lease and commit that claim before network publication; they never hold a database transaction open while waiting for RabbitMQ.
-- Publisher Confirm changes an event to `PUBLISHED` only through a fencing update matching both `event_id` and the current `claim_token`. An expired Publisher cannot overwrite a newer owner's state.
-- A lease that expires before a successful state update makes the event eligible for another claim. Both Publishers may publish, so the design remains at-least-once and relies on Consumer Inbox deduplication.
-- Retryable publication errors use exponential backoff with a default automatic budget of 20 attempts and 24 hours. Deterministic schema or routing errors, and exhausted events, enter `FAILED` instead of retrying forever.
-- Online controlled republish is permitted only while the original event is at most seven days old. This bound remains shorter than the 14-day Inbox retention window, covering cases where RabbitMQ processed an event but its Confirm or Outbox state update was lost.
-- `PUBLISHED` rows remain in the hot table for 14 days before bounded-batch deletion or archival. `FAILED` rows remain for 30 days, but after the seven-day online-republish limit they are diagnosis records only and require offline inspection or data correction rather than publication to online Consumers.
-- Outbox monitoring uses pending count, oldest pending age, failure count, and publish latency. An oldest pending age above one minute alerts; above five minutes closes admission for new operations that require an Outbox, returning `503` before their transaction starts.
-- A crash after RabbitMQ acceptance but before the status update may publish the same `event_id` again.
-- Durable Consumers share an Inbox table with `UNIQUE(consumer_name, event_id)`, allowing Persistence and Analytics to process the same event independently.
-- A Consumer inserts its Inbox record in the same transaction as its business changes. A duplicate key skips repeated business work and is acknowledged safely.
-- For Chat persistence, the stored message and Inbox metadata retain `request_hash`; a duplicate hash is skipped, while a different hash for the same logical identity follows the conflict-audit rule in Section 5.2.
-- Automatic broker retries are bounded to at most one hour. Supported DLQ redrive and Outbox online-republish age are each at most seven days, and Inbox records are retained for 14 days, which includes the maximum retry or republish window plus a safety margin.
-- DLQ redrive preserves the original `event_id`, `occurred_at`, idempotency key, and business identifiers. Redrive never creates a logically new event identity.
-- Events older than the supported seven-day redrive window are not automatically returned to online Consumers. They require offline inspection and a controlled data correction.
-- Inbox cleanup deletes expired records in bounded batches. The retention rule is `inbox_retention >= max(maximum_outbox_online_republish_age, maximum_broker_retry_duration + maximum_supported_dlq_redrive_age) + safety_margin`.
+### 5.7 Observability and deployment
 
-The system therefore provides at-least-once delivery with one logical database effect, not exactly-once delivery.
+Prometheus records operational behavior, including:
 
-### 5.6 Live-session and replay lifecycle
+- HTTP latency and response counts
+- Active and rejected WebSocket connections
+- Publish Confirm latency and failures
+- Required-binding health
+- Outbox pending count, oldest age, retries, and failures
+- Consumer retry, DLQ, processing, and persistence latency
+- Redis admission failures and recovery
+- Chat conflict counts
 
-```text
-LiveSession(SCHEDULED)
-→ LiveSession(LIVE)
-→ LiveSession(ENDED)
+High-cardinality identifiers such as `user_id`, `message_id`, and `event_id` never appear as metric labels. Structured logs carry correlation and event identifiers for diagnosis.
 
-LiveSession(ENDED)
-→ create Replay(PROCESSING)
-→ trusted media result
-   ├─ Replay(AVAILABLE)
-   └─ Replay(FAILED)
-```
+`/healthz` reports process liveness. `/readyz` reports whether a process should receive new traffic. Readiness closes before graceful shutdown begins.
 
-- `LiveSession` is the persistent business record for one broadcast. Its server-generated `live_session_id` is created once and remains unchanged through `SCHEDULED`, `LIVE`, and `ENDED`.
-- A WebSocket Room is ephemeral per API instance and is keyed by the same `live_session_id`; it is not another `LiveSession` and does not own a separate business ID.
-- Ending a session uses a MySQL transaction to change `LIVE → ENDED`, record database-UTC `ended_at`, and insert a `live_session.ended` Outbox event. The event tells API instances to close their local send gates and later remove Rooms after connections close.
-- Ordinary Chat and Reaction use a weak cutoff because their high-volume path does not lock the LiveSession row. Each API rejects new frames as soon as it observes `ENDED`, but propagation delay may allow a small number of tail events after the authoritative `ended_at`.
-- Any tail event already acknowledged by the API is still broadcast and persisted; the system never retracts an accepted interaction. Insights may exclude events with `accepted_at > ended_at` from official live-period aggregates while retaining them for audit and history.
-- Gift-effect comments use the strict transactional cutoff defined in Section 5.4. Enforcing a zero-tail cutoff for every Chat and Reaction would require synchronous coordination on the hot path and is intentionally outside the baseline.
-- Ending drains already accepted work and removes local Rooms after their connections close. The `LiveSession`, chat history, tail events, and analytics remain stored.
-- Only an `ENDED` session may create a Replay. Creation is idempotent through `UNIQUE(source_live_session_id)`.
-- `Replay` receives its own server-generated `replay_id` and retains `source_live_session_id`; it is a separate resource and never replaces or renames the original `LiveSession`.
-- Orion creates the Replay in `PROCESSING`; the external media plane performs recording, storage, and delivery work outside this system and reports only a final `AVAILABLE` or `FAILED` result.
-- A trusted media result includes a unique `provider_event_id`. Duplicate event IDs return the existing result without changing state.
-- Valid baseline transitions are `PROCESSING → AVAILABLE`, `PROCESSING → FAILED`, and a compensating `FAILED → AVAILABLE`. `AVAILABLE` is terminal and cannot be downgraded by late `PROCESSING` or `FAILED` events.
-- Automatic `FAILED → PROCESSING` retry is not part of the baseline. A future explicit, authenticated retry operation may introduce a new processing attempt.
-- Media result endpoints require service authentication and replay protection. An `AVAILABLE` result must provide a playback URL from an approved media/CDN origin.
-- The existing generic `Video` model is migrated to `Replay` rather than expanded into a media service.
-- Only `AVAILABLE` replays appear in the public feed.
-- Media upload, transcoding, storage, and CDN delivery remain external responsibilities.
+The deployment exercise must demonstrate:
 
-### 5.7 Cache, admission control, and degradation
+- Two API replicas and at least one Worker
+- Liveness and readiness probes
+- Resource requests and limits
+- Secrets supplied outside the image
+- A termination grace period longer than the process shutdown timeout
+- Rolling replacement without accepting new work on draining replicas
+- Cross-instance Chat delivery and recovery after one API restart
 
-- MySQL is authoritative for durable business data.
-- MySQL is selected for local ACID transactions, row locks, unique constraints, relational queries, and the Grant/Comment/Outbox atomic boundary. RabbitMQ buffering and reaction aggregation keep its expected workload within the project target.
-- A NoSQL chat-history store is considered only after measured MySQL write or retention limits require horizontal partitioning; it would complement rather than replace MySQL transaction data.
-- Under normal operation, Redis Lua scripts atomically enforce distributed Token Buckets keyed by user and room before Chat or Reaction publication.
-- The Redis limiter uses a short operation deadline. A timeout or consecutive failures open the limiter circuit and enter `DEGRADED_LOCAL` instead of blocking WebSocket goroutines.
-- In `DEGRADED_LOCAL`, each API instance uses bounded in-memory Token Buckets with TTL eviction and a bounded key count.
-- A local per-user bucket uses 20% of the normal user refill rate and burst capacity because an established WebSocket is owned by one API instance; per-user connection limits reduce multi-connection bypass.
-- The cluster-wide degraded room budget is 20% of the normal global room limit. Each instance receives `degraded_room_budget / MAX_API_REPLICAS`, so the aggregate remains bounded even when all allowed replicas are active.
-- `MAX_API_REPLICAS` must match the deployment autoscaling cap and is validated as a positive startup setting. The baseline two-API deployment uses `MAX_API_REPLICAS = 2`; changing the deployment cap requires changing this configuration.
-- Local degradation lasts at most 30 seconds. A successful Redis recovery probe returns the process to `HEALTHY`; otherwise it enters `FAIL_CLOSED`.
-- In `FAIL_CLOSED`, new Chat and Reaction requests return `503`, while established WebSocket connections remain available for receiving events and read-only operations continue.
-- Exceeding either a normal Redis limit or a degraded local limit returns `429`; `503` is reserved for dependency-driven refusal after the degradation budget expires.
-- Cache misses use request coalescing to prevent concurrent reads for the same hot key.
-- Redis read-cache failures use a MySQL fallback protected by deadlines, concurrency limits, and a circuit breaker.
-- Fallback saturation returns a controlled `503` rather than overloading MySQL.
-- Gift credits never use the Redis limiter or cache as their source of truth and remain protected by MySQL transactions during a Redis outage.
-- Database writes invalidate or refresh related cache entries.
-
-### 5.8 WebSocket lifecycle and broadcast
-
-- WebSocket upgrades require authentication and live-room authorization.
-- One ownership model controls the room map and prevents concurrent mutation.
-- Each room has a bounded broadcast queue; each client has a bounded send queue.
-- Slow consumers are disconnected rather than blocking the room.
-- Read limits, write deadlines, and ping/pong heartbeats detect unhealthy connections.
-- Typed event envelopes allow ordinary chat, live reactions, gifts, and gift-effect comments to share one broadcast path.
-- `BroadcastIfPresent` never creates an empty room merely to deliver an event.
-- Clients deduplicate repeated real-time events by `event_id`; chat history and real-time chat are merged by `(live_session_id, user_id, message_id)`.
-- Join, leave, room deletion, reconnect, and shutdown follow explicit ordering.
-
-### 5.9 Analytics and observability
-
-- The Analytics Consumer maintains per-session and per-minute interaction aggregates in MySQL.
-- Business aggregates include chat volume, reactions by type, gift activity, and gift-effect comment usage.
-- `GET /live-sessions/:id/insights` returns aggregate series, totals, and peak-activity time without requiring a dedicated frontend.
-- Prometheus records operational behavior such as request latency, publish latency, queue depth, retry count, DLQ depth, Consumer backlog, processing errors, and WebSocket connections.
-- Redis limiter state, local-fallback admissions, fail-closed rejections, cache-fallback concurrency, and recovery time are exposed as bounded-cardinality metrics.
-- Required-binding health, Chat payload conflicts, Outbox claim/fencing failures, oldest pending age, and tail events accepted after session end are monitored and alerted.
-- High-cardinality business identifiers such as `user_id`, `message_id`, and `event_id` are excluded from Prometheus labels.
-- `context.Context` propagates deadlines through HTTP, services, repositories, Redis, MySQL, and RabbitMQ operations.
-- Correlation IDs connect API logs, event headers, Worker logs, and database operations.
-- API and Worker processes implement graceful shutdown with a fixed deadline.
-- `/healthz` reports process liveness; `/readyz` reports ability to accept traffic.
-
-### 5.10 Security and public errors
-
-- Required secrets and dependency configuration are validated before startup.
-- Request bodies, pagination, WebSocket frames, connection counts, and message rates are bounded.
-- RabbitMQ topology, publisher, and Consumer identities use separate least-privilege credentials; runtime identities cannot mutate shared durable topology.
-- Trusted gift and media results require service authentication, unique provider event identities, bounded timestamp replay protection, and payload-hash conflict detection.
-- Internal failures use typed errors and map to a stable public error envelope.
-- Database errors, infrastructure details, stack traces, and credentials are never returned to clients.
+Kubernetes is the preferred learning target. Full GitOps, a service mesh, cluster provisioning, and multi-region operation are outside the first release.
 
 ## 6. Consistency and Reliability
 
@@ -406,75 +330,69 @@ LiveSession(ENDED)
 
 | Interaction | Guarantee | Design |
 | --- | --- | --- |
-| Ordinary chat acceptance | Conditional durable asynchronous acceptance | Success requires a confirmed routable publication while the access-controlled topology and required Persistence binding are validated; Confirm and mandatory alone do not prove that binding. |
-| Ordinary chat persistence | Eventual consistency | MySQL preserves the first persisted `(live_session_id, user_id, message_id)` value; equal hashes are duplicates and conflicting hashes are audited without a defined winner. |
-| Real-time room delivery | Best effort | Online copies are provisional; reconnecting clients eventually reconcile to persisted history, but a finite recovery window cannot prove completeness or strict cross-instance order. |
-| Live reactions | Best-effort client intent and eventual aggregates | Every received frame is a new Reaction with no client ACK/retry; internal publication retry reuses `event_id`, and Analytics maintains per-minute counts. |
-| Gift-effect comment | Read-after-write for the sender | MySQL atomically consumes one credit, inserts the comment, and records its Outbox event before success is returned. |
-| Interaction analytics | Eventual consistency | An idempotent Consumer updates business aggregates independently of request handling. |
-| Live-session interaction cutoff | Weak for Chat/Reaction; strict for Gift-effect comments | APIs reject after observing `ENDED`; acknowledged propagation-tail events remain durable, while the Gift transaction locks and checks the LiveSession. |
-| Live-session and replay reads | Bounded stale reads | Redis accelerates reads; MySQL remains the source of truth. |
-| Replay creation and media results | Idempotent monotonic transitions | One Replay references one ended session; duplicate provider events are harmless and `AVAILABLE` cannot be downgraded. |
-| Replay comments | Read-after-write for the creator | The API returns only after the MySQL transaction commits. |
+| LiveSession transition | Atomic conditional state change | MySQL is authoritative and rejects invalid or concurrent transitions. |
+| Session-ended publication | Durable eventual publication | The state change and Outbox event commit in one transaction; publication is at least once. |
+| Chat acceptance | Conditional durable asynchronous acceptance | Success requires confirmed, routable RabbitMQ publication while required topology checks pass. |
+| Chat persistence | Eventual consistency | The first committed business key and canonical content become authoritative. |
+| Real-time delivery | Best effort | Per-API realtime queues serve connected Clients; history repairs missed Chat messages. |
+| Interaction cutoff | Weak distributed cutoff | APIs close send gates after observing `ENDED`; previously accepted tail events remain valid. |
+| Redis admission | Fail closed | New Chat sends are refused when the distributed limiter cannot safely decide. |
 
 ### Reliability targets
 
 | Scenario | Expected behavior |
 | --- | --- |
-| Duplicate event delivery | Each durable Consumer produces one logical database effect. |
-| Poison message | Retries are bounded and the message enters the correct DLQ. |
-| RabbitMQ unavailable during Chat or Reaction | Chat receives no accepted ACK; a Reaction frame produces no published effect and is not retried by the client protocol. |
-| Required Persistence binding missing | Topology audit alerts, messaging readiness fails, and Chat/Reaction send admission closes even if real-time queues still exist. |
-| RabbitMQ unavailable after a gift-effect commit | The Outbox retains and retries the event within its bounded budget; exhaustion moves it to `FAILED` for alerting and controlled retry without losing committed business data. |
-| Single RabbitMQ process or container restart | With retained broker storage, runtime processes reconnect and the privileged initializer/auditor restores and validates topology before send gates reopen. This does not cover broker-host or disk loss. |
-| Redis limiter outage | For at most 30 seconds, local user buckets use 20% of normal capacity and each local room bucket receives one `MAX_API_REPLICAS` share of the 20% degraded cluster budget; the system then fails closed with `503`. |
-| Redis cache outage | Reads use deadline- and semaphore-bounded MySQL fallback; saturation returns `503` rather than exhausting the database. |
-| Redis outage during Gift use | Grant selection and credit consumption continue transactionally in MySQL without Redis correctness dependencies. |
-| Persistence Consumer or MySQL outage | Chat events remain queued, retries are bounded, and pressure does not propagate without limit. |
-| Slow Analytics Consumer | Analytics lag grows independently without blocking chat acceptance or persistence. |
-| API crash after a business commit | The committed Outbox event remains publishable. |
-| Concurrent Chat key with conflicting payloads | One payload wins at MySQL commit; the other is audited and acknowledged without overwrite or automatic redrive. |
-| Session ends under interaction load | APIs converge through `live_session.ended`; acknowledged tail events remain stored, while new Gift-effect comments fail the transactional `LIVE` check. |
-| `SIGTERM` during load | New work stops and in-flight work is drained or safely returned within the deadline. |
-| WebSocket churn | No data race, panic, blocked registration, empty-room leak, or leaked connection. |
+| Duplicate durable delivery | Inbox or a business unique key produces one logical MySQL effect. |
+| Poison message | Bounded retries end in the Persistence DLQ. |
+| RabbitMQ unavailable during Chat | No accepted Chat ACK is returned. |
+| RabbitMQ unavailable after session End | The committed Outbox event remains pending and retries later. |
+| API crashes after Outbox publication but before the `PUBLISHED` fencing update | The event may publish again; stable identity prevents duplicate effects. |
+| Required binding missing | Readiness and the interaction send gate close until topology is restored. |
+| Redis unavailable | New Chat sends return `503`; established connections may continue receiving. |
+| Persistence Consumer or MySQL unavailable | RabbitMQ buffers accepted Chat within configured queue and retry bounds. |
+| Slow WebSocket Client | Its bounded queue fills and only that Client is disconnected. |
+| API process restarts | Local Rooms disappear, RabbitMQ reconnects, and Clients reconnect and reconcile history. |
+| `SIGTERM` during load | Admission stops and HTTP, WebSocket, Publisher, and Consumer work share one bounded shutdown period. |
 
-### Verification strategy
+## 7. Verification Strategy
 
-| Layer | Scope |
+| Layer | Required evidence |
 | --- | --- |
-| Unit | State transitions, UUIDv4 message validation, session-scoped event-ID derivation, request-hash conflict classification, preserved event time, Reaction intent semantics, Grant eligibility and lock retry, Outbox fencing, replica-aware fallback-budget calculation, and retry classification. |
-| Integration | Real MySQL, Redis, and RabbitMQ tests for conflicting `(live_session_id, user_id, message_id)` publication, unchanged `occurred_at` across Publisher retries and DLQ redrive, per-Consumer Inbox isolation, redrive-age rejection, confirms, mandatory returns, required-binding send-gate closure, isolated Persistence and Analytics retry/DLQ paths, Replay transition guards, Token Bucket behavior, and cursor-based eventual discovery. |
-| Race and fuzz | Concurrent Hub/Room lifecycle, slow clients, malformed events, invalid envelopes, and bounded WebSocket input. |
-| End to end | Two API instances verify conditional Chat acceptance, cross-instance broadcast, authoritative-history reconciliation, bounded reconnect attempts, weak session-end cutoff, strict Gift cutoff, reaction-by-type aggregation, Gift credits, and Insights results. |
-| Load | Sustained chat and reaction bursts measure throughput, p95/p99 latency, confirm latency, queue depth, persistence delay, and slow-client removal. |
-| Failure injection | Restart or pause API, Worker, RabbitMQ, Redis, and MySQL; remove a required binding; expire and reclaim an Outbox lease; verify Redis `HEALTHY → DEGRADED_LOCAL → FAIL_CLOSED → HEALTHY`, cache-fallback saturation, crash windows, duplicate delivery, retry/DLQ, and graceful `SIGTERM`. |
+| Unit | State transitions, event identity, payload-conflict classification, retry classification, Outbox fencing, admission limits, and error mapping. |
+| MySQL integration | Migrations, concurrent transitions, Outbox atomicity, claim expiry, fencing updates, Inbox deduplication, and Chat conflicts. |
+| RabbitMQ integration | Topology, confirms, mandatory returns, reconnect, retry/DLQ routing, acknowledgements, and duplicate delivery. |
+| Race and fuzz | Hub/Room lifecycle, slow Clients, malformed envelopes, frame bounds, and concurrent shutdown. |
+| End to end | Two API replicas verify cross-instance Chat, session-end propagation, persistence, reconnect reconciliation, and Redis refusal/recovery. |
+| Load | Sustained Chat measures p95/p99 acceptance latency, Confirm latency, queue depth, persistence delay, and slow-client removal. |
+| Failure injection | Restart or pause API, Worker, RabbitMQ, Redis, and MySQL; remove a binding; expire an Outbox lease; send `SIGTERM` under load. |
+| Deployment | Record rollout behavior, probe transitions, resource use, commands, recovery time, and residual risk. |
 
-Tests run in a production-like environment, not claimed as real production traffic. Commands, expected behavior, measurements, recovery time, and residual risks are recorded in `PRODUCTION_READINESS.md`.
+Repeatable commands, results, measurements, and known limitations are recorded in `PRODUCTION_READINESS.md`. Local tests or a single successful demonstration do not justify a production-ready claim.
 
-## 7. Implementation Roadmap
+## 8. Implementation Roadmap
 
-1. **Domain model:** introduce `LiveSession` with weak and strict cutoff paths, guarded Replay transitions, `ChatMessage`, `ReactionAggregate`, `GiftEffectGrant`, fenced Outbox leases, per-Consumer Inbox records, and interaction aggregate models; migrate the existing `Video` feed to Replay.
-2. **Foundation:** add versioned migrations, configuration validation, secrets cleanup, typed errors, health endpoints, and a CI baseline.
-3. **WebSocket safety:** authenticate connections; establish single room ownership, bounded queues, heartbeats, graceful shutdown, and race tests.
-4. **Messaging foundation:** replace direct named queues with a versioned interaction exchange, stable event envelopes, separated topology/runtime permissions, required-binding audits, publisher confirms, mandatory routing, reconnection, one per-API real-time queue, isolated retry/DLQ paths, and fenced Outbox publication.
-5. **Persistent chat:** add client-generated UUIDv4 message IDs, request hashes, authenticated user/message uniqueness, stable event IDs, API-assigned event time, direct confirmed publication, first-persisted conflict handling, exponential reconnect reconciliation, and client deduplication.
-6. **Live reactions:** add deliberately non-retrying client intent, stable internal publication IDs, typed append-only reactions, real-time effects, per-type aggregation, and burst tests.
-7. **Gift effects:** add hashed trusted gift results, database-time Grant eligibility, consistent LiveSession/Grant locking, bounded transaction retry, idempotent credit consumption, and Transactional Outbox publication.
-8. **Analytics:** add an idempotent Consumer, per-session/per-minute business aggregates, and a Live Interaction Insights API; keep operational telemetry in Prometheus.
-9. **Cache and degradation:** add distributed Redis Token Buckets, replica-aware local user/room fallback for at most 30 seconds, validated `MAX_API_REPLICAS`, fail-closed admission, request coalescing, semaphore-bounded MySQL fallback, circuit breaking, and cache invalidation.
-10. **Verification:** automate the verification matrix and publish repeatable results in `PRODUCTION_READINESS.md`.
+1. **Foundation — implemented:** configuration validation, migrations, secrets cleanup, public errors, health endpoints, metrics, Docker Compose, and CI.
+2. **Authentication and LiveSession — implemented:** registration, login, JWT middleware, lifecycle APIs, MySQL constraints, and concurrency tests.
+3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, and graceful shutdown. Client interaction frames remain disabled.
+4. **Messaging foundation — in progress:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, and connection recovery are implemented. The per-API realtime subscriber and runtime topology health are next.
+5. **Session-ended Outbox:** Outbox migration, fenced claim and lease, Publisher loop, atomic End transaction, `live_session.ended` publication, and process-local send-gate propagation.
+6. **Persistent Chat:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox persistence, history, and bounded reconnect recovery.
+7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
+8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 
-## 8. Out of Scope
+Each roadmap item includes implementation, focused tests, operational metrics, failure behavior, and documentation. A new business feature does not create a second messaging framework.
 
-- Media upload, transcoding, live video delivery, storage, or CDN integration
-- Payment processing, refunds, or financial-grade ledger correctness
-- Kafka migration, Kafka Streams, Kubernetes deployment, or GitOps
-- Multi-node RabbitMQ clustering, Quorum Queue failover, or claims of broker-node high availability
+## 9. Out of Scope for the First Release
+
+- Media upload, transcoding, live video delivery, recording storage, or CDN integration
+- Replay metadata, replay feeds, media callbacks, and replay comments
+- Payment processing, refunds, or a financial-grade ledger
+- A complete gift-provider product flow
+- A business analytics dashboard or Live Interaction Insights API
+- Redis read caching and complex local degradation
+- Kafka, Kafka Streams, or event sourcing
+- Multi-node RabbitMQ clustering and Quorum Queue failover
+- Multi-region deployment, strict global ordering, or zero-tail global interaction cutoff
 - Full presence tracking or authoritative online-user state
-- Strict global ordering across all live sessions
-- A zero-tail, globally synchronized cutoff for Chat and Reaction at `ended_at`
-- Permanently retaining every raw interaction event in the message broker
-- Synchronized chat playback against the recorded-media timeline
-- Automatic media-processing retry after a Replay enters `FAILED`
-- Replacing the HTTP framework or ORM
-- Claiming production readiness based only on local testing
+- Full GitOps, service mesh adoption, or a custom Kubernetes Operator
+- Claiming production readiness without repeatable deployment and failure evidence

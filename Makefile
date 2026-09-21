@@ -11,6 +11,7 @@ check:
 
 test-integration:
 	test -n "$$ORION_TEST_MYSQL_DSN"
+	test -n "$$ORION_TEST_RABBITMQ_URL"
 	go test -tags=integration -count=1 ./tests/integration
 
 compose-config:
