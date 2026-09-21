@@ -57,6 +57,9 @@ func main() {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq")
 	}
 	defer rabbitMQ.Close()
+	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
+	}
 
 	checker := health.NewChecker(sqlDB, redis, rabbitMQ)
 	userRepo := repository.NewUserRepository(db)

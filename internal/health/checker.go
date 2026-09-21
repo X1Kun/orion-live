@@ -6,17 +6,20 @@ import (
 	"sync/atomic"
 
 	redisclient "github.com/go-redis/redis/v8"
-	"github.com/streadway/amqp"
 )
+
+type RabbitMQChecker interface {
+	Ready() error
+}
 
 type Checker struct {
 	db       *sql.DB
 	redis    *redisclient.Client
-	rabbitMQ *amqp.Connection
+	rabbitMQ RabbitMQChecker
 	ready    atomic.Bool
 }
 
-func NewChecker(db *sql.DB, redis *redisclient.Client, rabbitMQ *amqp.Connection) *Checker {
+func NewChecker(db *sql.DB, redis *redisclient.Client, rabbitMQ RabbitMQChecker) *Checker {
 	checker := &Checker{db: db, redis: redis, rabbitMQ: rabbitMQ}
 	checker.ready.Store(true)
 	return checker
@@ -36,8 +39,8 @@ func (c *Checker) Ready(ctx context.Context) error {
 	if err := c.redis.Ping(ctx).Err(); err != nil {
 		return err
 	}
-	if c.rabbitMQ.IsClosed() {
-		return amqp.ErrClosed
+	if err := c.rabbitMQ.Ready(); err != nil {
+		return err
 	}
 	return nil
 }
