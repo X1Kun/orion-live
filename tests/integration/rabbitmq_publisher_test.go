@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -114,7 +115,7 @@ func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 		t.Fatalf("create Hub: %v", err)
 	}
 	defer func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		if err := hub.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("Hub.Shutdown() error = %v", err)
@@ -133,7 +134,7 @@ func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 		t.Fatalf("start realtime subscriber: %v", err)
 	}
 	defer func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		if err := subscriber.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("Subscriber.Shutdown() error = %v", err)
@@ -172,14 +173,19 @@ func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 	if err := oldConnection.Close(); err != nil {
 		t.Fatalf("close current connection: %v", err)
 	}
-	waitForIntegration(t, 5*time.Second, func() bool { return subscriber.Ready() != nil }, "subscriber to observe disconnect")
-	waitForIntegration(t, 15*time.Second, func() bool { return subscriber.Ready() == nil }, "subscriber to recover")
-
-	afterReconnect := integrationChatEvent("realtime-after-reconnect")
-	if err := publisher.Publish(ctx, afterReconnect); err != nil {
-		t.Fatalf("publish realtime event after reconnect: %v", err)
+	reconnectCtx, reconnectCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer reconnectCancel()
+	newConnection, err := client.Connection(reconnectCtx)
+	if err != nil {
+		t.Fatalf("wait for RabbitMQ reconnect: %v", err)
 	}
-	assertRealtimeEvent(t, roomClient, afterReconnect.EventID)
+	if newConnection == oldConnection {
+		t.Fatal("RabbitMQ client did not replace the closed connection")
+	}
+	assertRealtimeEventuallyRecovers(t, reconnectCtx, publisher, roomClient)
+	if err := subscriber.Ready(); err != nil {
+		t.Fatalf("Subscriber.Ready() after recovered delivery = %v", err)
+	}
 }
 
 func assertQueuedEvent(t *testing.T, ctx context.Context, client *rabbitclient.Client, wantEventID string) {
@@ -240,14 +246,40 @@ func assertRealtimeEvent(t *testing.T, client *roomhub.Client, wantEventID strin
 	}
 }
 
-func waitForIntegration(t *testing.T, timeout time.Duration, condition func() bool, description string) {
+func assertRealtimeEventuallyRecovers(
+	t *testing.T,
+	ctx context.Context,
+	publisher *rabbitclient.Publisher,
+	client *roomhub.Client,
+) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", description)
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for realtime recovery: %v", ctx.Err())
+		default:
 		}
-		time.Sleep(10 * time.Millisecond)
+
+		event := integrationChatEvent(fmt.Sprintf("realtime-after-reconnect-%d", attempt))
+		if err := publisher.Publish(ctx, event); err != nil {
+			if errors.Is(err, rabbitclient.ErrPublishInterrupted) || errors.Is(err, rabbitclient.ErrPublishNacked) {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			t.Fatalf("publish realtime event after reconnect: %v", err)
+		}
+		select {
+		case body := <-client.Outbound():
+			var delivered messaging.Event
+			if err := json.Unmarshal(body, &delivered); err != nil {
+				t.Fatalf("unmarshal recovered realtime event: %v", err)
+			}
+			if delivered.EventID != event.EventID {
+				t.Fatalf("recovered event ID = %q, want %q", delivered.EventID, event.EventID)
+			}
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 }
 

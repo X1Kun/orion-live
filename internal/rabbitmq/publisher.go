@@ -128,6 +128,10 @@ func (p *Publisher) awaitPublishResult(ctx context.Context, confirmation *amqp.D
 		return newUnroutableError(returned)
 	case <-confirmation.Done():
 		if !confirmation.Acked() {
+			if p.channel == nil || p.channel.IsClosed() {
+				p.invalidateChannelLocked()
+				return fmt.Errorf("%w: %v", ErrPublishInterrupted, ErrPublishNacked)
+			}
 			return ErrPublishNacked
 		}
 		return p.pendingReturnOrNil()
