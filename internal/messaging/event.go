@@ -10,8 +10,6 @@ import (
 const (
 	SchemaVersionV1 = 1
 
-	ExchangeName = "orion.interaction.events"
-
 	EventTypeLiveSessionEnded    EventType = "live_session.ended"
 	EventTypeChatMessageAccepted EventType = "chat.message.accepted"
 )
@@ -21,6 +19,15 @@ var (
 )
 
 type EventType string
+
+func (t EventType) IsSupported() bool {
+	switch t {
+	case EventTypeLiveSessionEnded, EventTypeChatMessageAccepted:
+		return true
+	default:
+		return false
+	}
+}
 
 type Event struct {
 	EventID       string          `json:"event_id"`
@@ -37,7 +44,7 @@ func (e Event) Validate() error {
 	if e.EventID == "" {
 		return fmt.Errorf("%w: event_id is required", ErrInvalidEvent)
 	}
-	if e.EventType != EventTypeLiveSessionEnded && e.EventType != EventTypeChatMessageAccepted {
+	if !e.EventType.IsSupported() {
 		return fmt.Errorf("%w: unsupported event_type %q", ErrInvalidEvent, e.EventType)
 	}
 	if e.SchemaVersion != SchemaVersionV1 {

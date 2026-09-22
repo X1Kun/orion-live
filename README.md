@@ -18,10 +18,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Authenticated live-session creation and lifecycle management
 - Authenticated WebSocket connections to live rooms
 - Versioned interaction events, durable RabbitMQ topology, and confirmed mandatory publication
+- Per-API realtime RabbitMQ subscription and process-local Hub delivery
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-The per-API realtime subscriber, `live_session.ended` Outbox, persistent Chat, Redis admission, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+The `live_session.ended` Outbox, persistent Chat, Redis admission, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 

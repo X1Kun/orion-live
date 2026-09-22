@@ -36,7 +36,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	rabbitMQConfig := loadRabbitMQ()
+	rabbitMQConfig, err := loadRabbitMQ()
+	if err != nil {
+		return Config{}, err
+	}
 	dependencyInitTimeout, err := envDuration("DEPENDENCY_INIT_TIMEOUT", 10*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -105,6 +108,9 @@ func (c Config) Validate() error {
 	}
 	if c.Redis.Database < 0 {
 		return errors.New("REDIS_DB must not be negative")
+	}
+	if err := c.RabbitMQ.validate(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -12,6 +12,15 @@ import (
 
 const DefaultPersistenceRetryDelay = 5 * time.Second
 
+const (
+	InteractionExchangeName           = "orion.interaction.events"
+	PersistenceQueueName              = "orion.interaction.persistence"
+	PersistenceRetryExchangeName      = "orion.interaction.persistence.retry"
+	PersistenceRetryQueueName         = "orion.interaction.persistence.retry"
+	PersistenceDeadLetterExchangeName = "orion.interaction.persistence.dlx"
+	PersistenceDeadLetterQueueName    = "orion.interaction.persistence.dlq"
+)
+
 var ErrInvalidRetryDelay = errors.New("persistence retry delay must be positive")
 
 func InitializeCoreTopology(ctx context.Context, client *Client, retryDelay time.Duration) error {
@@ -40,18 +49,18 @@ func DeclareCoreTopology(channel *amqp.Channel, retryDelay time.Duration) error 
 }
 
 func declareInteractionExchange(channel *amqp.Channel) error {
-	if err := channel.ExchangeDeclare(messaging.ExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := channel.ExchangeDeclare(InteractionExchangeName, "topic", true, false, false, false, nil); err != nil {
 		return fmt.Errorf("declare interaction exchange: %w", err)
 	}
 	return nil
 }
 
 func declarePersistenceDeadLetterPath(channel *amqp.Channel) error {
-	if err := channel.ExchangeDeclare(messaging.PersistenceDLXName, "topic", true, false, false, false, nil); err != nil {
+	if err := channel.ExchangeDeclare(PersistenceDeadLetterExchangeName, "topic", true, false, false, false, nil); err != nil {
 		return fmt.Errorf("declare persistence DLX: %w", err)
 	}
 	if _, err := channel.QueueDeclare(
-		messaging.PersistenceDLQName,
+		PersistenceDeadLetterQueueName,
 		true,
 		false,
 		false,
@@ -61,9 +70,9 @@ func declarePersistenceDeadLetterPath(channel *amqp.Channel) error {
 		return fmt.Errorf("declare persistence DLQ: %w", err)
 	}
 	if err := channel.QueueBind(
-		messaging.PersistenceDLQName,
+		PersistenceDeadLetterQueueName,
 		"#",
-		messaging.PersistenceDLXName,
+		PersistenceDeadLetterExchangeName,
 		false,
 		nil,
 	); err != nil {
@@ -73,16 +82,16 @@ func declarePersistenceDeadLetterPath(channel *amqp.Channel) error {
 }
 
 func declarePersistenceRetryPath(channel *amqp.Channel, retryDelay time.Duration) error {
-	if err := channel.ExchangeDeclare(messaging.PersistenceRetryExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := channel.ExchangeDeclare(PersistenceRetryExchangeName, "topic", true, false, false, false, nil); err != nil {
 		return fmt.Errorf("declare persistence retry exchange: %w", err)
 	}
 	retryArguments := amqp.Table{
 		"x-queue-type":           "classic",
 		"x-message-ttl":          retryDelay.Milliseconds(),
-		"x-dead-letter-exchange": messaging.ExchangeName,
+		"x-dead-letter-exchange": InteractionExchangeName,
 	}
 	if _, err := channel.QueueDeclare(
-		messaging.PersistenceRetryQueueName,
+		PersistenceRetryQueueName,
 		true,
 		false,
 		false,
@@ -92,9 +101,9 @@ func declarePersistenceRetryPath(channel *amqp.Channel, retryDelay time.Duration
 		return fmt.Errorf("declare persistence retry queue: %w", err)
 	}
 	if err := channel.QueueBind(
-		messaging.PersistenceRetryQueueName,
+		PersistenceRetryQueueName,
 		"#",
-		messaging.PersistenceRetryExchangeName,
+		PersistenceRetryExchangeName,
 		false,
 		nil,
 	); err != nil {
@@ -106,10 +115,10 @@ func declarePersistenceRetryPath(channel *amqp.Channel, retryDelay time.Duration
 func declarePersistenceConsumerPath(channel *amqp.Channel) error {
 	persistenceArguments := amqp.Table{
 		"x-queue-type":           "classic",
-		"x-dead-letter-exchange": messaging.PersistenceDLXName,
+		"x-dead-letter-exchange": PersistenceDeadLetterExchangeName,
 	}
 	if _, err := channel.QueueDeclare(
-		messaging.PersistenceQueueName,
+		PersistenceQueueName,
 		true,
 		false,
 		false,
@@ -119,9 +128,9 @@ func declarePersistenceConsumerPath(channel *amqp.Channel) error {
 		return fmt.Errorf("declare persistence queue: %w", err)
 	}
 	if err := channel.QueueBind(
-		messaging.PersistenceQueueName,
+		PersistenceQueueName,
 		string(messaging.EventTypeChatMessageAccepted),
-		messaging.ExchangeName,
+		InteractionExchangeName,
 		false,
 		nil,
 	); err != nil {
