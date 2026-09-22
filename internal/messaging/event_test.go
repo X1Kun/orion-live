@@ -46,6 +46,15 @@ func TestEventValidation(t *testing.T) {
 	}
 }
 
+func TestEventTypeIsSupported(t *testing.T) {
+	if !EventTypeLiveSessionEnded.IsSupported() || !EventTypeChatMessageAccepted.IsSupported() {
+		t.Fatal("core event type was not supported")
+	}
+	if EventType("unknown").IsSupported() {
+		t.Fatal("unknown event type was supported")
+	}
+}
+
 func validEvent() Event {
 	return Event{
 		EventID:       "event-1",

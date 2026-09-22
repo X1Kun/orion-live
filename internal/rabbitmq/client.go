@@ -32,9 +32,9 @@ type Client struct {
 	readyCh chan struct{}
 	closed  bool
 
-	closeCh   chan struct{}
-	doneCh    chan struct{}
-	closeOnce sync.Once
+	shutdownCh       chan struct{}
+	supervisorDoneCh chan struct{}
+	closeOnce        sync.Once
 }
 
 func Open(ctx context.Context, cfg config.RabbitMQ) (*Client, error) {
@@ -45,11 +45,11 @@ func Open(ctx context.Context, cfg config.RabbitMQ) (*Client, error) {
 	readyCh := make(chan struct{})
 	close(readyCh)
 	client := &Client{
-		cfg:     cfg,
-		conn:    conn,
-		readyCh: readyCh,
-		closeCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		cfg:              cfg,
+		conn:             conn,
+		readyCh:          readyCh,
+		shutdownCh:       make(chan struct{}),
+		supervisorDoneCh: make(chan struct{}),
 	}
 	go client.supervise(conn)
 	return client, nil
@@ -71,7 +71,7 @@ func (c *Client) Connection(ctx context.Context) (*amqp.Connection, error) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-c.closeCh:
+		case <-c.shutdownCh:
 			return nil, ErrClientClosed
 		case <-readyCh:
 		}
@@ -109,60 +109,68 @@ func (c *Client) Close() error {
 		c.closed = true
 		conn := c.conn
 		c.mu.Unlock()
-		close(c.closeCh)
+		close(c.shutdownCh)
 		if conn != nil && !conn.IsClosed() {
 			closeErr = conn.Close()
 		}
-		<-c.doneCh
+		<-c.supervisorDoneCh
 	})
 	return closeErr
 }
 
-func (c *Client) supervise(conn *amqp.Connection) {
-	defer close(c.doneCh)
-	current := conn
+func (c *Client) supervise(initial *amqp.Connection) {
+	defer close(c.supervisorDoneCh)
+
+	current := initial
 	for {
-		closedCh := current.NotifyClose(make(chan *amqp.Error, 1))
+		connectionClosedCh := current.NotifyClose(make(chan *amqp.Error, 1))
 		select {
-		case <-c.closeCh:
+		case <-c.shutdownCh:
 			c.clearConnection(current)
 			return
-		case <-closedCh:
+		case <-connectionClosedCh:
 			c.clearConnection(current)
 		}
 
-		delay := reconnectMinDelay
-		for {
-			select {
-			case <-c.closeCh:
-				return
-			default:
-			}
+		next, err := c.recoverConnection()
+		if err != nil {
+			return
+		}
+		current = next
+	}
+}
 
-			dialCtx, cancel := context.WithTimeout(context.Background(), reconnectDialTimeout)
-			next, err := dial(dialCtx, c.cfg)
-			cancel()
-			if err == nil {
-				if c.installConnection(next) {
-					current = next
-					break
-				}
-				_ = next.Close()
-				return
-			}
+func (c *Client) recoverConnection() (*amqp.Connection, error) {
+	delay := reconnectMinDelay
+	for {
+		select {
+		case <-c.shutdownCh:
+			return nil, ErrClientClosed
+		default:
+		}
 
-			jittered := time.Duration(float64(delay) * (0.8 + rand.Float64()*0.4))
-			timer := time.NewTimer(jittered)
-			select {
-			case <-c.closeCh:
-				timer.Stop()
-				return
-			case <-timer.C:
+		dialCtx, cancel := context.WithTimeout(context.Background(), reconnectDialTimeout)
+		next, err := dial(dialCtx, c.cfg)
+		cancel()
+		if err == nil {
+			if c.installConnection(next) {
+				return next, nil
 			}
-			delay *= 2
-			if delay > reconnectMaxDelay {
-				delay = reconnectMaxDelay
-			}
+			_ = next.Close()
+			return nil, ErrClientClosed
+		}
+
+		jittered := time.Duration(float64(delay) * (0.8 + rand.Float64()*0.4))
+		timer := time.NewTimer(jittered)
+		select {
+		case <-c.shutdownCh:
+			timer.Stop()
+			return nil, ErrClientClosed
+		case <-timer.C:
+		}
+		delay *= 2
+		if delay > reconnectMaxDelay {
+			delay = reconnectMaxDelay
 		}
 	}
 }

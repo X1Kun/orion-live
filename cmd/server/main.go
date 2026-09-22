@@ -12,13 +12,14 @@ import (
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/health"
+	rabbitclient "github.com/X1Kun/orion-live/internal/rabbitmq"
+	"github.com/X1Kun/orion-live/internal/realtime"
 	"github.com/X1Kun/orion-live/internal/repository"
 	"github.com/X1Kun/orion-live/internal/router"
 	"github.com/X1Kun/orion-live/internal/service"
 	roomhub "github.com/X1Kun/orion-live/internal/websocket"
 	"github.com/X1Kun/orion-live/pkg/logger"
 	mysqlclient "github.com/X1Kun/orion-live/pkg/mysql"
-	rabbitclient "github.com/X1Kun/orion-live/pkg/rabbitmq"
 	redisclient "github.com/X1Kun/orion-live/pkg/redis"
 	"github.com/gin-gonic/gin"
 )
@@ -61,7 +62,6 @@ func main() {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
 	}
 
-	checker := health.NewChecker(sqlDB, redis, rabbitMQ)
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
@@ -70,6 +70,11 @@ func main() {
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize WebSocket hub")
 	}
+	realtimeSubscriber, err := realtime.Start(startupCtx, rabbitMQ, webSocketHub, cfg.RabbitMQ.RealtimePrefetch)
+	if err != nil {
+		logger.Log.WithError(err).Fatal("initialize realtime subscriber")
+	}
+	checker := health.NewChecker(sqlDB, redis, rabbitMQ, realtimeSubscriber)
 	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, webSocketHub, cfg.WebSocket)
 	engine := router.New(
 		handler.NewUserHandler(userService),
@@ -110,7 +115,7 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.ProcessShutdownTimeout)
 	defer cancelShutdown()
 	var shutdownWG sync.WaitGroup
-	shutdownWG.Add(2)
+	shutdownWG.Add(3)
 	go func() {
 		defer shutdownWG.Done()
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -122,6 +127,12 @@ func main() {
 		defer shutdownWG.Done()
 		if err := webSocketHandler.Shutdown(shutdownCtx); err != nil {
 			logger.Log.WithError(err).Error("WebSocket shutdown did not complete")
+		}
+	}()
+	go func() {
+		defer shutdownWG.Done()
+		if err := realtimeSubscriber.Shutdown(shutdownCtx); err != nil {
+			logger.Log.WithError(err).Error("realtime subscriber shutdown did not complete")
 		}
 	}()
 	shutdownWG.Wait()

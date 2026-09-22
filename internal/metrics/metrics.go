@@ -30,4 +30,19 @@ var (
 		Name: "orion_websocket_connections",
 		Help: "Current number of active WebSocket connections.",
 	})
+
+	// RealtimeEventsTotal counts process-local realtime delivery outcomes.
+	RealtimeEventsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "orion_realtime_events_total",
+			Help: "Total number of realtime events handled by outcome.",
+		},
+		[]string{"event_type", "result"},
+	)
+
+	// RealtimeSubscriberReady reports whether the local realtime Consumer is active.
+	RealtimeSubscriberReady = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orion_realtime_subscriber_ready",
+		Help: "Whether the process-local realtime subscriber is ready.",
+	})
 )

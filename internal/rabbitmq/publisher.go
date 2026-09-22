@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrPublisherClosed   = errors.New("rabbitmq publisher is closed")
-	ErrPublishNacked     = errors.New("rabbitmq publication was negatively acknowledged")
-	ErrPublishUnroutable = errors.New("rabbitmq publication was returned as unroutable")
+	ErrPublisherClosed    = errors.New("rabbitmq publisher is closed")
+	ErrPublishInterrupted = errors.New("rabbitmq publication was interrupted")
+	ErrPublishNacked      = errors.New("rabbitmq publication was negatively acknowledged")
+	ErrPublishUnroutable  = errors.New("rabbitmq publication was returned as unroutable")
 )
 
 type UnroutableError struct {
@@ -41,17 +42,17 @@ func (e *UnroutableError) Unwrap() error {
 type Publisher struct {
 	client *Client
 
-	mu      sync.Mutex
-	channel *amqp.Channel
-	returns <-chan amqp.Return
-	closed  <-chan *amqp.Error
-	stopped bool
+	mu              sync.Mutex
+	channel         *amqp.Channel
+	returnsCh       <-chan amqp.Return
+	channelClosedCh <-chan *amqp.Error
+	closed          bool
 }
 
 func NewPublisher(ctx context.Context, client *Client) (*Publisher, error) {
 	publisher := &Publisher{client: client}
 	publisher.mu.Lock()
-	err := publisher.openChannelLocked(ctx)
+	err := publisher.ensureChannelLocked(ctx)
 	publisher.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -67,16 +68,16 @@ func (p *Publisher) Publish(ctx context.Context, event messaging.Event) error {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.stopped {
+	if p.closed {
 		return ErrPublisherClosed
 	}
-	if err := p.openChannelLocked(ctx); err != nil {
+	if err := p.ensureChannelLocked(ctx); err != nil {
 		return err
 	}
 
 	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
 		ctx,
-		messaging.ExchangeName,
+		InteractionExchangeName,
 		event.RoutingKey(),
 		true,
 		false,
@@ -96,55 +97,67 @@ func (p *Publisher) Publish(ctx context.Context, event messaging.Event) error {
 	)
 	if err != nil {
 		p.invalidateChannelLocked()
-		return fmt.Errorf("publish interaction event: %w", err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: %v", ErrPublishInterrupted, err)
 	}
 	if confirmation == nil {
 		p.invalidateChannelLocked()
-		return errors.New("rabbitmq publisher confirm mode is not enabled")
+		return fmt.Errorf("%w: publisher confirm mode is not enabled", ErrPublishInterrupted)
 	}
+	return p.awaitPublishResult(ctx, confirmation)
+}
 
-	for {
-		select {
-		case returned, ok := <-p.returns:
-			if !ok {
-				p.invalidateChannelLocked()
-				return ErrPublisherClosed
-			}
-			return newUnroutableError(returned)
-		case <-confirmation.Done():
-			if !confirmation.Acked() {
-				return ErrPublishNacked
-			}
-			select {
-			case returned, ok := <-p.returns:
-				if !ok {
-					p.invalidateChannelLocked()
-					return ErrPublisherClosed
-				}
-				return newUnroutableError(returned)
-			default:
-				return nil
-			}
-		case amqpErr, ok := <-p.closed:
-			p.invalidateChannelLocked()
-			if ok && amqpErr != nil {
-				return fmt.Errorf("%w: %v", ErrPublisherClosed, amqpErr)
-			}
-			return ErrPublisherClosed
-		case <-ctx.Done():
-			p.invalidateChannelLocked()
-			return ctx.Err()
+func (p *Publisher) awaitPublishResult(ctx context.Context, confirmation *amqp.DeferredConfirmation) error {
+	select {
+	case <-ctx.Done():
+		p.invalidateChannelLocked()
+		return ctx.Err()
+	case amqpErr, ok := <-p.channelClosedCh:
+		p.invalidateChannelLocked()
+		if ok && amqpErr != nil {
+			return fmt.Errorf("%w: %v", ErrPublishInterrupted, amqpErr)
 		}
+		return ErrPublishInterrupted
+	case returned, ok := <-p.returnsCh:
+		if !ok {
+			p.invalidateChannelLocked()
+			return ErrPublishInterrupted
+		}
+		return newUnroutableError(returned)
+	case <-confirmation.Done():
+		if !confirmation.Acked() {
+			if p.channel == nil || p.channel.IsClosed() {
+				p.invalidateChannelLocked()
+				return fmt.Errorf("%w: %v", ErrPublishInterrupted, ErrPublishNacked)
+			}
+			return ErrPublishNacked
+		}
+		return p.pendingReturnOrNil()
+	}
+}
+
+func (p *Publisher) pendingReturnOrNil() error {
+	select {
+	case returned, ok := <-p.returnsCh:
+		if !ok {
+			p.invalidateChannelLocked()
+			return ErrPublishInterrupted
+		}
+		return newUnroutableError(returned)
+	default:
+		return nil
 	}
 }
 
 func (p *Publisher) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.stopped {
+	if p.closed {
 		return nil
 	}
-	p.stopped = true
+	p.closed = true
 	if p.channel == nil || p.channel.IsClosed() {
 		return nil
 	}
@@ -153,8 +166,8 @@ func (p *Publisher) Close() error {
 	return err
 }
 
-func (p *Publisher) openChannelLocked(ctx context.Context) error {
-	if p.stopped {
+func (p *Publisher) ensureChannelLocked(ctx context.Context) error {
+	if p.closed {
 		return ErrPublisherClosed
 	}
 	if p.channel != nil && !p.channel.IsClosed() {
@@ -162,15 +175,18 @@ func (p *Publisher) openChannelLocked(ctx context.Context) error {
 	}
 	channel, err := p.client.Channel(ctx)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: %v", ErrPublishInterrupted, err)
 	}
 	if err := channel.Confirm(false); err != nil {
 		_ = channel.Close()
-		return fmt.Errorf("enable publisher confirms: %w", err)
+		return fmt.Errorf("%w: enable publisher confirms: %v", ErrPublishInterrupted, err)
 	}
 	p.channel = channel
-	p.returns = channel.NotifyReturn(make(chan amqp.Return, 1))
-	p.closed = channel.NotifyClose(make(chan *amqp.Error, 1))
+	p.returnsCh = channel.NotifyReturn(make(chan amqp.Return, 1))
+	p.channelClosedCh = channel.NotifyClose(make(chan *amqp.Error, 1))
 	return nil
 }
 
@@ -179,8 +195,8 @@ func (p *Publisher) invalidateChannelLocked() {
 		_ = p.channel.Close()
 	}
 	p.channel = nil
-	p.returns = nil
-	p.closed = nil
+	p.returnsCh = nil
+	p.channelClosedCh = nil
 }
 
 func newUnroutableError(returned amqp.Return) error {
