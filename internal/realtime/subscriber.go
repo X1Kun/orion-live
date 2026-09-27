@@ -139,6 +139,9 @@ func (s *Subscriber) handleDelivery(delivery amqp.Delivery) error {
 	if err := event.Validate(); err != nil {
 		return acknowledgeRealtime(delivery, eventType, "malformed")
 	}
+	if event.EventType == messaging.EventTypeLiveSessionEnded {
+		s.hub.MarkSessionEnded(event.LiveSessionID)
+	}
 
 	// Forward the validated original envelope to preserve versioned unknown fields
 	// and avoid a second JSON encoding on the realtime path.

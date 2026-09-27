@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/X1Kun/orion-live/internal/messaging"
 	"github.com/X1Kun/orion-live/internal/model"
 	"github.com/X1Kun/orion-live/internal/repository"
 	"gorm.io/gorm"
@@ -105,14 +106,18 @@ func (s *liveSessionService) End(ctx context.Context, id, hostUserID uint64) (*m
 		return nil, ErrInvalidLiveSessionState
 	}
 
-	updated, err := s.sessions.End(ctx, id, hostUserID)
+	correlationID, err := messaging.NewCorrelationID()
+	if err != nil {
+		return nil, err
+	}
+	ended, updated, err := s.sessions.End(ctx, id, hostUserID, correlationID)
 	if err != nil {
 		return nil, err
 	}
 	if !updated {
 		return nil, ErrInvalidLiveSessionState
 	}
-	return s.Get(ctx, id)
+	return ended, nil
 }
 
 func (s *liveSessionService) AuthorizeJoin(ctx context.Context, id, _ uint64) error {

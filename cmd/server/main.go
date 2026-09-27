@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -12,6 +13,8 @@ import (
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/health"
+	"github.com/X1Kun/orion-live/internal/messaging"
+	"github.com/X1Kun/orion-live/internal/outbox"
 	rabbitclient "github.com/X1Kun/orion-live/internal/rabbitmq"
 	"github.com/X1Kun/orion-live/internal/realtime"
 	"github.com/X1Kun/orion-live/internal/repository"
@@ -61,11 +64,25 @@ func main() {
 	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
 	}
+	rabbitPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
+	if err != nil {
+		logger.Log.WithError(err).Fatal("initialize rabbitmq publisher")
+	}
+	defer rabbitPublisher.Close()
 
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
 	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
+	outboxRepo := repository.NewOutboxRepository(db)
+	instanceToken, err := messaging.NewCorrelationID()
+	if err != nil {
+		logger.Log.WithError(err).Fatal("generate instance identity")
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		logger.Log.WithError(err).Fatal("read instance hostname")
+	}
 	webSocketHub, err := roomhub.NewHub(cfg.WebSocket.RoomBroadcastQueueCapacity)
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize WebSocket hub")
@@ -74,6 +91,7 @@ func main() {
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize realtime subscriber")
 	}
+	outboxRelay := outbox.StartRelay(outboxRepo, rabbitPublisher, hostname+":"+instanceToken[:8], cfg.Outbox)
 	checker := health.NewChecker(sqlDB, redis, rabbitMQ, realtimeSubscriber)
 	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, webSocketHub, cfg.WebSocket)
 	engine := router.New(
@@ -115,12 +133,18 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.ProcessShutdownTimeout)
 	defer cancelShutdown()
 	var shutdownWG sync.WaitGroup
-	shutdownWG.Add(3)
+	shutdownWG.Add(4)
 	go func() {
 		defer shutdownWG.Done()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			logger.Log.WithError(err).Error("HTTP shutdown did not complete")
 			_ = server.Close()
+		}
+	}()
+	go func() {
+		defer shutdownWG.Done()
+		if err := outboxRelay.Shutdown(shutdownCtx); err != nil {
+			logger.Log.WithError(err).Error("Outbox Relay shutdown did not complete")
 		}
 	}()
 	go func() {

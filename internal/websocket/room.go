@@ -17,6 +17,7 @@ type room struct {
 	mu      sync.RWMutex
 	clients map[*Client]struct{}
 	closed  bool
+	ended   bool
 }
 
 func newRoom(id uint64, hub *Hub, broadcastQueueCapacity int) *room {
@@ -49,6 +50,9 @@ func (r *room) add(client *Client) error {
 	defer r.mu.Unlock()
 	if r.closed {
 		return ErrHubClosed
+	}
+	if r.ended {
+		return ErrRoomEnded
 	}
 	if client.isClosed() {
 		return ErrClientClosed
@@ -108,6 +112,18 @@ func (r *room) clientCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.clients)
+}
+
+func (r *room) markEnded() {
+	r.mu.Lock()
+	r.ended = true
+	r.mu.Unlock()
+}
+
+func (r *room) sendAllowed() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return !r.closed && !r.ended
 }
 
 func (r *room) requestStop() {
