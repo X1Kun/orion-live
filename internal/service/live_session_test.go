@@ -227,15 +227,15 @@ func (r *liveSessionRepositoryFake) Start(_ context.Context, id, hostUserID uint
 	return true, nil
 }
 
-func (r *liveSessionRepositoryFake) End(_ context.Context, id, hostUserID uint64) (bool, error) {
+func (r *liveSessionRepositoryFake) End(_ context.Context, id, hostUserID uint64, _ string) (*model.LiveSession, bool, error) {
 	if r.forceEndMiss || r.session == nil || r.session.ID != id || r.session.HostUserID != hostUserID || r.session.Status != model.LiveSessionStatusLive {
-		return false, nil
+		return nil, false, nil
 	}
 	now := time.Now().UTC()
 	r.session.Status = model.LiveSessionStatusEnded
 	r.session.EndedAt = &now
 	r.session.UpdatedAt = now
-	return true, nil
+	return cloneLiveSession(r.session), true, nil
 }
 
 func cloneLiveSession(session *model.LiveSession) *model.LiveSession {

@@ -192,6 +192,24 @@ func TestClientCanJoinOnlyOneRoom(t *testing.T) {
 	}
 }
 
+func TestEndedRoomRejectsNewClientsButStillBroadcasts(t *testing.T) {
+	hub := newTestHub(t, 2)
+	existing := newTestClient(t, 2)
+	if err := hub.Join(1, existing); err != nil {
+		t.Fatalf("Join() error = %v", err)
+	}
+	if !hub.MarkSessionEnded(1) || hub.SendAllowed(1) {
+		t.Fatal("ended room kept its send gate open")
+	}
+	if err := hub.Join(1, newTestClient(t, 1)); !errors.Is(err, ErrRoomEnded) {
+		t.Fatalf("Join() error = %v, want %v", err, ErrRoomEnded)
+	}
+	broadcast(t, hub, 1, "ended")
+	if got := receiveMessage(t, existing); string(got) != "ended" {
+		t.Fatalf("message = %q", got)
+	}
+}
+
 func TestConcurrentJoinsClaimClientOnce(t *testing.T) {
 	hub := newTestHub(t, 1)
 	client := newTestClient(t, 1)

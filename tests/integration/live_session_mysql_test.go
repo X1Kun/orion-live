@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/X1Kun/orion-live/internal/messaging"
 	"github.com/X1Kun/orion-live/internal/model"
 	"github.com/X1Kun/orion-live/internal/repository"
 	"github.com/X1Kun/orion-live/migrations"
@@ -43,7 +44,7 @@ func TestLiveSessionMigrationAndRepository(t *testing.T) {
 	if err := migrations.Up(ctx, sqlDB); err != nil {
 		t.Fatalf("reapply migrations: %v", err)
 	}
-	assertMigrationVersions(t, ctx, sqlDB, 1, 2)
+	assertMigrationVersions(t, ctx, sqlDB, 1, 2, 3)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger:         logger.Default.LogMode(logger.Silent),
@@ -63,6 +64,7 @@ func TestLiveSessionMigrationAndRepository(t *testing.T) {
 		t.Fatalf("read host ID: %v", err)
 	}
 	defer func() {
+		_, _ = sqlDB.Exec("DELETE FROM outbox_events WHERE event_type = ?", "live_session.ended")
 		_, _ = sqlDB.Exec("DELETE FROM live_sessions WHERE host_user_id = ?", hostUserID)
 		_, _ = sqlDB.Exec("DELETE FROM users WHERE id = ?", hostUserID)
 	}()
@@ -86,11 +88,28 @@ func TestLiveSessionMigrationAndRepository(t *testing.T) {
 		t.Fatalf("start second session: updated = %v, error = %v; want duplicated key", updated, err)
 	}
 
-	updated, err = sessions.End(ctx, first.ID, uint64(hostUserID))
+	ended, updated, err := sessions.End(ctx, first.ID, uint64(hostUserID), "integration-end")
 	if err != nil || !updated {
 		t.Fatalf("end first session: updated = %v, error = %v", updated, err)
 	}
-	updated, err = sessions.End(ctx, first.ID, uint64(hostUserID))
+	if ended.Status != model.LiveSessionStatusEnded || ended.EndedAt == nil {
+		t.Fatalf("ended session = %#v", ended)
+	}
+	outboxRepository := repository.NewOutboxRepository(db)
+	claimed, err := outboxRepository.ClaimBatch(ctx, "integration-publisher", 10, time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim Outbox: count = %d, error = %v", len(claimed), err)
+	}
+	if claimed[0].AttemptCount != 1 || claimed[0].ClaimToken == nil {
+		t.Fatalf("claimed Outbox = %#v", claimed[0])
+	}
+	if updated, err := outboxRepository.MarkPublished(ctx, claimed[0].EventID, "stale-token"); err != nil || updated {
+		t.Fatalf("stale fencing update = %v, error = %v", updated, err)
+	}
+	if updated, err := outboxRepository.MarkPublished(ctx, claimed[0].EventID, *claimed[0].ClaimToken); err != nil || !updated {
+		t.Fatalf("current fencing update = %v, error = %v", updated, err)
+	}
+	_, updated, err = sessions.End(ctx, first.ID, uint64(hostUserID), "integration-repeat-end")
 	if err != nil || updated {
 		t.Fatalf("repeat end first session: updated = %v, error = %v", updated, err)
 	}
@@ -105,6 +124,44 @@ func TestLiveSessionMigrationAndRepository(t *testing.T) {
 	}
 	if stored.Status != model.LiveSessionStatusLive || stored.StartedAt == nil || stored.EndedAt != nil {
 		t.Fatalf("stored second session = %#v", stored)
+	}
+
+	collisionEvent, err := messaging.NewLiveSessionEndedEvent(second.ID, uint64(hostUserID), time.Now().UTC(), "collision")
+	if err != nil {
+		t.Fatalf("create collision event: %v", err)
+	}
+	collisionBody, err := collisionEvent.Marshal()
+	if err != nil {
+		t.Fatalf("marshal collision event: %v", err)
+	}
+	if err := db.Create(&model.OutboxEvent{
+		EventID: collisionEvent.EventID, EventType: string(collisionEvent.EventType), SchemaVersion: 1,
+		Payload: collisionBody, Status: model.OutboxStatusPending, AvailableAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("insert collision Outbox: %v", err)
+	}
+	if _, updated, err := sessions.End(ctx, second.ID, uint64(hostUserID), "must-rollback"); err == nil || updated {
+		t.Fatalf("End with duplicate Outbox: updated = %v, error = %v", updated, err)
+	}
+	stored, err = sessions.FindByID(ctx, second.ID)
+	if err != nil || stored.Status != model.LiveSessionStatusLive || stored.EndedAt != nil {
+		t.Fatalf("End transaction did not roll back: session = %#v, error = %v", stored, err)
+	}
+
+	firstClaim, err := outboxRepository.ClaimBatch(ctx, "publisher-one", 1, 20*time.Millisecond)
+	if err != nil || len(firstClaim) != 1 {
+		t.Fatalf("first lease claim: %d %v", len(firstClaim), err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	secondClaim, err := outboxRepository.ClaimBatch(ctx, "publisher-two", 1, time.Minute)
+	if err != nil || len(secondClaim) != 1 {
+		t.Fatalf("expired lease reclaim: %d %v", len(secondClaim), err)
+	}
+	if updated, err := outboxRepository.MarkFailed(ctx, secondClaim[0].EventID, *firstClaim[0].ClaimToken, errors.New("stale")); err != nil || updated {
+		t.Fatalf("stale lease update = %v, error = %v", updated, err)
+	}
+	if updated, err := outboxRepository.MarkFailed(ctx, secondClaim[0].EventID, *secondClaim[0].ClaimToken, errors.New("current")); err != nil || !updated {
+		t.Fatalf("current lease update = %v, error = %v", updated, err)
 	}
 }
 

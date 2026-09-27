@@ -45,4 +45,14 @@ var (
 		Name: "orion_realtime_subscriber_ready",
 		Help: "Whether the process-local realtime subscriber is ready.",
 	})
+
+	OutboxPublishTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "orion_outbox_publish_total", Help: "Total number of Outbox publish outcomes."},
+		[]string{"event_type", "result"},
+	)
+
+	OutboxFencingFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "orion_outbox_fencing_failures_total",
+		Help: "Total number of Outbox state updates rejected by claim fencing.",
+	})
 )

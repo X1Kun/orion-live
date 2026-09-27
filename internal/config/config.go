@@ -17,6 +17,7 @@ type Config struct {
 	MySQL                  MySQL
 	Redis                  Redis
 	RabbitMQ               RabbitMQ
+	Outbox                 Outbox
 }
 
 func Load() (Config, error) {
@@ -37,6 +38,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	rabbitMQConfig, err := loadRabbitMQ()
+	if err != nil {
+		return Config{}, err
+	}
+	outboxConfig, err := loadOutbox()
 	if err != nil {
 		return Config{}, err
 	}
@@ -64,6 +69,7 @@ func Load() (Config, error) {
 		MySQL:                  mysqlConfig,
 		Redis:                  redisConfig,
 		RabbitMQ:               rabbitMQConfig,
+		Outbox:                 outboxConfig,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -110,6 +116,9 @@ func (c Config) Validate() error {
 		return errors.New("REDIS_DB must not be negative")
 	}
 	if err := c.RabbitMQ.validate(); err != nil {
+		return err
+	}
+	if err := c.Outbox.validate(); err != nil {
 		return err
 	}
 	return nil

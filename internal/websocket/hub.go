@@ -11,6 +11,7 @@ var (
 	ErrInvalidRoomQueueCapacity = errors.New("room broadcast queue capacity must be positive")
 	ErrInvalidLiveSessionID     = errors.New("live session id must be positive")
 	ErrNilClient                = errors.New("websocket client must not be nil")
+	ErrRoomEnded                = errors.New("websocket room has ended")
 )
 
 // Hub owns the process-local mapping between live sessions and rooms.
@@ -160,6 +161,30 @@ func (h *Hub) ClientCount(liveSessionID uint64) int {
 	count := current.clientCount()
 	h.mu.RUnlock()
 	return count
+}
+
+func (h *Hub) MarkSessionEnded(liveSessionID uint64) bool {
+	h.mu.RLock()
+	current := h.rooms[liveSessionID]
+	if current == nil {
+		h.mu.RUnlock()
+		return false
+	}
+	current.markEnded()
+	h.mu.RUnlock()
+	return true
+}
+
+func (h *Hub) SendAllowed(liveSessionID uint64) bool {
+	h.mu.RLock()
+	current := h.rooms[liveSessionID]
+	if current == nil {
+		h.mu.RUnlock()
+		return false
+	}
+	allowed := current.sendAllowed()
+	h.mu.RUnlock()
+	return allowed
 }
 
 func (h *Hub) removeIfEmpty(candidate *room) bool {

@@ -89,7 +89,7 @@ HTTP / WebSocket Clients
          │                                                │
          │ direct confirmed Chat publish                  │ pending Outbox
          │                                                ▼
-         │                                         Outbox Publisher
+         │                                           Outbox Relay
          │                                                │
          └──────────────────┬─────────────────────────────┘
                             ▼
@@ -124,7 +124,7 @@ The baseline deployment uses one RabbitMQ broker node. Durable queues and retain
 | WebSocket Hub | Own process-local Rooms, bounded Client queues, slow-client removal, and graceful connection shutdown. |
 | Topology Initializer | Declare the exchange, durable processing queue, retry queue, DLQ, and required bindings idempotently. |
 | Realtime Subscriber | Consume the API instance's ephemeral queue and deliver events to local Rooms. |
-| Outbox Publisher | Lease committed events, publish with confirms, and use a claim token to fence stale publishers. |
+| Outbox Relay | Lease committed events, relay them through the RabbitMQ Publisher, and use a claim token to fence stale Relay instances. |
 | Persistence Consumer | Persist Chat idempotently and acknowledge only after its local transaction commits. |
 | MySQL | Authoritative store for users, sessions, Chat history, Outbox, and Inbox records. |
 | Redis | Distributed interaction admission. It is not an authoritative store for durable business data. |
@@ -227,7 +227,7 @@ COMMIT
 - The state transition and event either commit together or both fail.
 - The HTTP response succeeds after the MySQL transaction commits; RabbitMQ availability does not decide whether End is durable.
 - Outbox records contain `status`, `available_at`, `claimed_by`, `claim_token`, `lease_until`, `attempt_count`, `last_error`, and `published_at`.
-- A Publisher claims a bounded batch and commits the lease before network publication.
+- An Outbox Relay claims a bounded batch and commits the lease before network publication.
 - Publisher Confirm marks an event `PUBLISHED` only when both `event_id` and the current `claim_token` match.
 - A lease expiry may cause duplicate publication, so downstream Consumers use stable `event_id` values and idempotent processing.
 - Publication retries use bounded exponential backoff. Deterministic and exhausted failures enter `FAILED` for alerting and controlled recovery.
@@ -352,7 +352,7 @@ Kubernetes is the preferred learning target. Full GitOps, a service mesh, cluste
 | Persistence Consumer or MySQL unavailable | RabbitMQ buffers accepted Chat within configured queue and retry bounds. |
 | Slow WebSocket Client | Its bounded queue fills and only that Client is disconnected. |
 | API process restarts | Local Rooms disappear, RabbitMQ reconnects, and Clients reconnect and reconcile history. |
-| `SIGTERM` during load | Admission stops and HTTP, WebSocket, Publisher, and Consumer work share one bounded shutdown period. |
+| `SIGTERM` during load | Admission stops and HTTP, WebSocket, Outbox Relay, Publisher, and Consumer work share one bounded shutdown period. |
 
 ## 7. Verification Strategy
 
@@ -375,7 +375,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 2. **Authentication and LiveSession — implemented:** registration, login, JWT middleware, lifecycle APIs, MySQL constraints, and concurrency tests.
 3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, and graceful shutdown. Client interaction frames remain disabled.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
-5. **Session-ended Outbox:** Outbox migration, fenced claim and lease, Publisher loop, atomic End transaction, `live_session.ended` publication, and process-local send-gate propagation.
+5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
 6. **Persistent Chat:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox persistence, history, and bounded reconnect recovery.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
