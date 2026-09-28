@@ -67,7 +67,7 @@ Useful endpoints:
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
 | `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
 
-The current WebSocket endpoint requires a Bearer token in the upgrade request, accepts only `LIVE` sessions, and is outbound-only until the interaction event protocol is added. Client application messages are closed with WebSocket code `1003`. Connection limits are enforced per API instance; distributed Chat admission is added in the Redis phase.
+The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It accepts validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. Connection limits are enforced per API instance; Redis admission, durable Chat persistence, and history are added in the remaining Persistent Chat increments.
 
 Run the baseline quality gates without starting dependencies:
 

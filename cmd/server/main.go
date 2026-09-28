@@ -64,16 +64,22 @@ func main() {
 	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
 	}
-	rabbitPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
+	outboxPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
 	if err != nil {
-		logger.Log.WithError(err).Fatal("initialize rabbitmq publisher")
+		logger.Log.WithError(err).Fatal("initialize Outbox publisher")
 	}
-	defer rabbitPublisher.Close()
+	defer outboxPublisher.Close()
+	chatPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
+	if err != nil {
+		logger.Log.WithError(err).Fatal("initialize Chat publisher")
+	}
+	defer chatPublisher.Close()
 
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
 	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
+	chatService := service.NewChatService(chatPublisher, cfg.Chat)
 	outboxRepo := repository.NewOutboxRepository(db)
 	instanceToken, err := messaging.NewCorrelationID()
 	if err != nil {
@@ -91,9 +97,9 @@ func main() {
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize realtime subscriber")
 	}
-	outboxRelay := outbox.StartRelay(outboxRepo, rabbitPublisher, hostname+":"+instanceToken[:8], cfg.Outbox)
+	outboxRelay := outbox.StartRelay(outboxRepo, outboxPublisher, hostname+":"+instanceToken[:8], cfg.Outbox)
 	checker := health.NewChecker(sqlDB, redis, rabbitMQ, realtimeSubscriber)
-	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, webSocketHub, cfg.WebSocket)
+	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, chatService, webSocketHub, cfg.WebSocket)
 	engine := router.New(
 		handler.NewUserHandler(userService),
 		handler.NewLiveSessionHandler(liveSessionService),

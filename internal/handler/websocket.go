@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/metrics"
@@ -18,14 +17,14 @@ import (
 )
 
 var (
-	errWebSocketClientMessagesUnsupported = errors.New("client messages are not supported yet")
-	errWebSocketDraining                  = errors.New("WebSocket server is shutting down")
-	errWebSocketCapacityReached           = errors.New("WebSocket connection capacity reached")
-	errWebSocketUserLimitReached          = errors.New("WebSocket user connection limit reached")
+	errWebSocketDraining         = errors.New("WebSocket server is shutting down")
+	errWebSocketCapacityReached  = errors.New("WebSocket connection capacity reached")
+	errWebSocketUserLimitReached = errors.New("WebSocket user connection limit reached")
 )
 
 type WebSocketHandler struct {
 	sessions service.LiveSessionService
+	chat     service.ChatService
 	hub      *roomhub.Hub
 	config   config.WebSocket
 	upgrader gorilla.Upgrader
@@ -37,9 +36,10 @@ type WebSocketHandler struct {
 	activeByUser map[uint64]int
 }
 
-func NewWebSocketHandler(sessions service.LiveSessionService, hub *roomhub.Hub, cfg config.WebSocket) *WebSocketHandler {
+func NewWebSocketHandler(sessions service.LiveSessionService, chat service.ChatService, hub *roomhub.Hub, cfg config.WebSocket) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessions:     sessions,
+		chat:         chat,
 		hub:          hub,
 		config:       cfg,
 		upgrader:     gorilla.Upgrader{HandshakeTimeout: cfg.HandshakeTimeout},
@@ -93,9 +93,12 @@ func (h *WebSocketHandler) Connect(c *gin.Context) {
 		_ = connection.Close()
 	}()
 
-	readErr := h.readPump(connection)
-	if errors.Is(readErr, errWebSocketClientMessagesUnsupported) {
+	readErr := h.readPump(c.Request.Context(), connection, client, liveSessionID, userID)
+	if errors.Is(readErr, errWebSocketMessageTypeUnsupported) {
 		writeWebSocketClose(connection, gorilla.CloseUnsupportedData, readErr.Error(), h.config.WriteTimeout)
+		_ = connection.Close()
+	} else if errors.Is(readErr, errWebSocketOutboundQueueFull) {
+		writeWebSocketClose(connection, gorilla.CloseTryAgainLater, readErr.Error(), h.config.WriteTimeout)
 		_ = connection.Close()
 	}
 	h.hub.Leave(liveSessionID, client)
@@ -161,67 +164,6 @@ func (h *WebSocketHandler) release(userID uint64) {
 	}
 	h.lifecycleMu.Unlock()
 	h.connections.Done()
-}
-
-func (h *WebSocketHandler) readPump(connection *gorilla.Conn) error {
-	connection.SetReadLimit(h.config.ReadLimitBytes)
-	if err := connection.SetReadDeadline(time.Now().Add(h.config.PongTimeout)); err != nil {
-		return err
-	}
-	connection.SetPongHandler(func(string) error {
-		return connection.SetReadDeadline(time.Now().Add(h.config.PongTimeout))
-	})
-
-	for {
-		messageType, _, err := connection.ReadMessage()
-		if err != nil {
-			return err
-		}
-		if messageType == gorilla.TextMessage || messageType == gorilla.BinaryMessage {
-			return errWebSocketClientMessagesUnsupported
-		}
-	}
-}
-
-func (h *WebSocketHandler) writePump(connection *gorilla.Conn, client *roomhub.Client) error {
-	pingTicker := time.NewTicker(h.config.PingInterval)
-	defer pingTicker.Stop()
-
-	for {
-		select {
-		case message := <-client.Outbound():
-			if err := connection.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout)); err != nil {
-				return err
-			}
-			if err := connection.WriteMessage(gorilla.TextMessage, message); err != nil {
-				return err
-			}
-		case <-pingTicker.C:
-			if err := connection.WriteControl(gorilla.PingMessage, nil, time.Now().Add(h.config.WriteTimeout)); err != nil {
-				return err
-			}
-		case <-client.Done():
-			return connection.WriteControl(
-				gorilla.CloseMessage,
-				gorilla.FormatCloseMessage(gorilla.CloseNormalClosure, ""),
-				time.Now().Add(h.config.WriteTimeout),
-			)
-		}
-	}
-}
-
-func writeWebSocketClose(connection *gorilla.Conn, code int, message string, timeout time.Duration) {
-	_ = connection.WriteControl(
-		gorilla.CloseMessage,
-		gorilla.FormatCloseMessage(code, message),
-		time.Now().Add(timeout),
-	)
-}
-
-func unexpectedWebSocketError(err error) bool {
-	return err != nil &&
-		!errors.Is(err, errWebSocketClientMessagesUnsupported) &&
-		!gorilla.IsCloseError(err, gorilla.CloseNormalClosure, gorilla.CloseGoingAway, gorilla.CloseNoStatusReceived)
 }
 
 func handleWebSocketAdmissionError(c *gin.Context, err error) {

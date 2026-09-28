@@ -10,6 +10,7 @@ import (
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/model"
+	"github.com/X1Kun/orion-live/internal/service"
 	roomhub "github.com/X1Kun/orion-live/internal/websocket"
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +36,7 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 			t.Errorf("Hub.Shutdown() error = %v", err)
 		}
 	})
-	webSockets := handler.NewWebSocketHandler(liveSessions, hub, config.WebSocket{
+	webSockets := handler.NewWebSocketHandler(liveSessions, routerChatServiceStub{}, hub, config.WebSocket{
 		HandshakeTimeout:           time.Second,
 		WriteTimeout:               time.Second,
 		PongTimeout:                time.Minute,
@@ -81,6 +82,12 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 type routerReadinessCheckerStub struct{}
 
 func (routerReadinessCheckerStub) Ready(context.Context) error { return nil }
+
+type routerChatServiceStub struct{}
+
+func (routerChatServiceStub) Accept(context.Context, uint64, uint64, string, string) (service.ChatAcceptance, error) {
+	return service.ChatAcceptance{}, nil
+}
 
 type routerUserServiceStub struct{}
 

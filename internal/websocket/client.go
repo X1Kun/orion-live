@@ -61,7 +61,8 @@ func (c *Client) Done() <-chan struct{} {
 	return c.done
 }
 
-func (c *Client) enqueueOutbound(message []byte) bool {
+// EnqueueOutbound adds one server frame without blocking the caller.
+func (c *Client) EnqueueOutbound(message []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {

@@ -236,6 +236,15 @@ The realtime subscriber uses `live_session.ended` to close the local send gate a
 
 ### 5.4 Ordinary Chat pipeline
 
+Client frames use the following initial protocol:
+
+```json
+{"type":"chat.send","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","content":"hello"}
+{"type":"chat.ack","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","status":"accepted","accepted_at":"2026-09-28T01:02:03Z"}
+```
+
+`message_id` is a UUIDv4. Content preserves the submitted text, must not be blank, and is bounded to 500 Unicode code points. Invalid or unavailable sends receive a rejected `chat.ack`; they do not close an otherwise healthy connection.
+
 ```text
 WebSocket chat.send with client-generated message_id
 → obtain user_id from the authenticated connection
@@ -373,10 +382,10 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 
 1. **Foundation — implemented:** configuration validation, migrations, secrets cleanup, public errors, health endpoints, metrics, Docker Compose, and CI.
 2. **Authentication and LiveSession — implemented:** registration, login, JWT middleware, lifecycle APIs, MySQL constraints, and concurrency tests.
-3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, and graceful shutdown. Client interaction frames remain disabled.
+3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, graceful shutdown, and bounded `chat.send` frame handling.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
-6. **Persistent Chat:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox persistence, history, and bounded reconnect recovery.
+6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Confirmed Publish, `chat.ack`, and cross-instance broadcast are implemented. Redis admission, Inbox persistence, history, and bounded reconnect recovery remain.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 

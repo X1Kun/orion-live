@@ -53,6 +53,9 @@ func (e Event) Validate() error {
 	if e.CorrelationID == "" {
 		return fmt.Errorf("%w: correlation_id is required", ErrInvalidEvent)
 	}
+	if e.UserID == 0 {
+		return fmt.Errorf("%w: user_id must be positive", ErrInvalidEvent)
+	}
 	if e.LiveSessionID == 0 {
 		return fmt.Errorf("%w: live_session_id must be positive", ErrInvalidEvent)
 	}

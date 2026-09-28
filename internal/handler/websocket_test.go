@@ -83,14 +83,28 @@ func TestWebSocketConnectJoinsHubAndReceivesBroadcast(t *testing.T) {
 		t.Fatalf("message type = %d, body = %q", messageType, message)
 	}
 
-	if err := connection.WriteMessage(gorilla.TextMessage, []byte(`{"type":"chat.send"}`)); err != nil {
+	if err := connection.WriteMessage(gorilla.TextMessage, []byte(`{"type":"chat.send","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","content":"hello"}`)); err != nil {
 		t.Fatalf("WriteMessage() error = %v", err)
 	}
-	_, _, err = connection.ReadMessage()
-	var closeError *gorilla.CloseError
-	if !errors.As(err, &closeError) || closeError.Code != gorilla.CloseUnsupportedData {
-		t.Fatalf("client message close error = %v, want code %d", err, gorilla.CloseUnsupportedData)
+	_, acknowledgement, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatalf("read Chat acknowledgement: %v", err)
 	}
+	if !strings.Contains(string(acknowledgement), `"type":"chat.ack"`) || !strings.Contains(string(acknowledgement), `"status":"accepted"`) {
+		t.Fatalf("unexpected Chat acknowledgement: %s", acknowledgement)
+	}
+
+	if err := connection.WriteMessage(gorilla.TextMessage, []byte(`{"type":"chat.send","unknown":true}`)); err != nil {
+		t.Fatalf("write malformed Chat frame: %v", err)
+	}
+	_, rejection, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatalf("read Chat rejection: %v", err)
+	}
+	if !strings.Contains(string(rejection), `"status":"rejected"`) || !strings.Contains(string(rejection), `"code":"INVALID_FRAME"`) {
+		t.Fatalf("unexpected Chat rejection: %s", rejection)
+	}
+	writeClientClose(t, connection)
 	waitForWebSocketTest(t, func() bool { return hub.RoomCount() == 0 }, "client to leave room")
 }
 
@@ -165,7 +179,7 @@ func newWebSocketTestServerWithConfig(t *testing.T, admissionError error, cfg co
 			return admissionError
 		},
 	}
-	webSockets := NewWebSocketHandler(sessions, hub, cfg)
+	webSockets := NewWebSocketHandler(sessions, chatServiceStub{}, hub, cfg)
 	router := gin.New()
 	router.GET("/api/v1/live-sessions/:id/ws", middleware.Auth(webSocketTestSecret), webSockets.Connect)
 	server := httptest.NewServer(router)
@@ -178,6 +192,12 @@ func newWebSocketTestServerWithConfig(t *testing.T, admissionError error, cfg co
 		server.Close()
 	})
 	return server, hub, webSockets
+}
+
+type chatServiceStub struct{}
+
+func (chatServiceStub) Accept(_ context.Context, _, _ uint64, messageID, _ string) (service.ChatAcceptance, error) {
+	return service.ChatAcceptance{MessageID: strings.ToLower(messageID), AcceptedAt: time.Now().UTC()}, nil
 }
 
 func webSocketTestConfig() config.WebSocket {
