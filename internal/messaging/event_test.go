@@ -31,6 +31,7 @@ func TestEventValidation(t *testing.T) {
 		{name: "unknown type", mutate: func(e *Event) { e.EventType = "unknown" }},
 		{name: "wrong schema", mutate: func(e *Event) { e.SchemaVersion = 2 }},
 		{name: "missing correlation", mutate: func(e *Event) { e.CorrelationID = "" }},
+		{name: "missing user", mutate: func(e *Event) { e.UserID = 0 }},
 		{name: "missing session", mutate: func(e *Event) { e.LiveSessionID = 0 }},
 		{name: "non UTC time", mutate: func(e *Event) { e.OccurredAt = e.OccurredAt.In(time.FixedZone("UTC+8", 8*60*60)) }},
 		{name: "invalid payload", mutate: func(e *Event) { e.Payload = json.RawMessage("{") }},

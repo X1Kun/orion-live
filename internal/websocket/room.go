@@ -93,7 +93,7 @@ func (r *room) deliver(message []byte) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for client := range r.clients {
-		if client.enqueueOutbound(message) {
+		if client.EnqueueOutbound(message) {
 			continue
 		}
 		delete(r.clients, client)

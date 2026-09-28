@@ -18,6 +18,7 @@ type Config struct {
 	Redis                  Redis
 	RabbitMQ               RabbitMQ
 	Outbox                 Outbox
+	Chat                   Chat
 }
 
 func Load() (Config, error) {
@@ -42,6 +43,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	outboxConfig, err := loadOutbox()
+	if err != nil {
+		return Config{}, err
+	}
+	chatConfig, err := loadChat()
 	if err != nil {
 		return Config{}, err
 	}
@@ -70,6 +75,7 @@ func Load() (Config, error) {
 		Redis:                  redisConfig,
 		RabbitMQ:               rabbitMQConfig,
 		Outbox:                 outboxConfig,
+		Chat:                   chatConfig,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -117,6 +123,15 @@ func (c Config) Validate() error {
 	}
 	if err := c.RabbitMQ.validate(); err != nil {
 		return err
+	}
+	if err := c.Chat.validate(); err != nil {
+		return err
+	}
+	if c.Chat.PublishTimeout >= c.WebSocket.PongTimeout {
+		return errors.New("CHAT_PUBLISH_TIMEOUT must be shorter than WEBSOCKET_PONG_TIMEOUT")
+	}
+	if c.Chat.PublishTimeout >= c.ProcessShutdownTimeout {
+		return errors.New("CHAT_PUBLISH_TIMEOUT must be shorter than PROCESS_SHUTDOWN_TIMEOUT")
 	}
 	if err := c.Outbox.validate(); err != nil {
 		return err

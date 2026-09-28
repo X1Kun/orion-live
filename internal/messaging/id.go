@@ -9,6 +9,10 @@ func NewCorrelationID() (string, error) {
 	return newRandomID()
 }
 
+func NewEventID() (string, error) {
+	return newRandomID()
+}
+
 func NewClaimToken() (string, error) {
 	return newRandomID()
 }
