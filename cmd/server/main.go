@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/X1Kun/orion-live/internal/admission"
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/health"
@@ -79,7 +80,8 @@ func main() {
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
 	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
-	chatService := service.NewChatService(chatPublisher, cfg.Chat)
+	chatLimiter := admission.NewChatLimiter(redis, cfg.Chat)
+	chatService := service.NewChatService(chatLimiter, chatPublisher, cfg.Chat)
 	outboxRepo := repository.NewOutboxRepository(db)
 	instanceToken, err := messaging.NewCorrelationID()
 	if err != nil {

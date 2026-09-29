@@ -55,4 +55,9 @@ var (
 		Name: "orion_outbox_fencing_failures_total",
 		Help: "Total number of Outbox state updates rejected by claim fencing.",
 	})
+
+	ChatAdmissionTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "orion_chat_admission_total", Help: "Total number of Chat admission decisions."},
+		[]string{"result"},
+	)
 )

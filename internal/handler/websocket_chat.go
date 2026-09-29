@@ -58,9 +58,12 @@ func (h *WebSocketHandler) handleClientFrame(ctx context.Context, client *roomhu
 	accepted, err := h.chat.Accept(ctx, liveSessionID, userID, frame.MessageID, frame.Content)
 	if err != nil {
 		code, message := "CHAT_UNAVAILABLE", "message could not be accepted"
-		if errors.Is(err, service.ErrInvalidChatMessageID) || errors.Is(err, service.ErrInvalidChatContent) {
+		switch {
+		case errors.Is(err, service.ErrInvalidChatMessageID), errors.Is(err, service.ErrInvalidChatContent):
 			code, message = "INVALID_MESSAGE", err.Error()
-		} else {
+		case errors.Is(err, service.ErrChatRateLimited):
+			code, message = "CHAT_RATE_LIMITED", "Chat rate limit exceeded"
+		default:
 			logger.Log.WithError(err).
 				WithField("live_session_id", liveSessionID).
 				WithField("user_id", userID).
