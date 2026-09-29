@@ -127,11 +127,11 @@ func (c Config) Validate() error {
 	if err := c.Chat.validate(); err != nil {
 		return err
 	}
-	if c.Chat.PublishTimeout >= c.WebSocket.PongTimeout {
-		return errors.New("CHAT_PUBLISH_TIMEOUT must be shorter than WEBSOCKET_PONG_TIMEOUT")
+	if c.Chat.AdmissionTimeout >= c.WebSocket.PongTimeout-c.Chat.PublishTimeout {
+		return errors.New("Chat admission and publish timeouts must fit within WEBSOCKET_PONG_TIMEOUT")
 	}
-	if c.Chat.PublishTimeout >= c.ProcessShutdownTimeout {
-		return errors.New("CHAT_PUBLISH_TIMEOUT must be shorter than PROCESS_SHUTDOWN_TIMEOUT")
+	if c.Chat.AdmissionTimeout >= c.ProcessShutdownTimeout-c.Chat.PublishTimeout {
+		return errors.New("Chat admission and publish timeouts must fit within PROCESS_SHUTDOWN_TIMEOUT")
 	}
 	if err := c.Outbox.validate(); err != nil {
 		return err

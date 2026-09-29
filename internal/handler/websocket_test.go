@@ -163,6 +163,46 @@ func TestWebSocketDrainingRejectsHandshake(t *testing.T) {
 	assertWebSocketHandshakeStatus(t, server.URL, 7, 42, http.StatusServiceUnavailable)
 }
 
+func TestWebSocketChatAdmissionRejections(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "rate limited", err: service.ErrChatRateLimited, code: "CHAT_RATE_LIMITED"},
+		{name: "admission unavailable", err: service.ErrChatAdmissionUnavailable, code: "CHAT_UNAVAILABLE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub, err := roomhub.NewHub(1)
+			if err != nil {
+				t.Fatalf("NewHub() error = %v", err)
+			}
+			client, err := roomhub.NewClient(1)
+			if err != nil {
+				t.Fatalf("NewClient() error = %v", err)
+			}
+			if err := hub.Join(7, client); err != nil {
+				t.Fatalf("Join() error = %v", err)
+			}
+			handler := &WebSocketHandler{chat: chatServiceStub{err: tt.err}, hub: hub}
+			frame := []byte(`{"type":"chat.send","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","content":"hello"}`)
+			if err := handler.handleClientFrame(context.Background(), client, 7, 42, frame); err != nil {
+				t.Fatalf("handleClientFrame() error = %v", err)
+			}
+			response := <-client.Outbound()
+			if !strings.Contains(string(response), `"code":"`+tt.code+`"`) {
+				t.Fatalf("unexpected rejection: %s", response)
+			}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := hub.Shutdown(shutdownCtx); err != nil {
+				t.Fatalf("Shutdown() error = %v", err)
+			}
+		})
+	}
+}
+
 func newWebSocketTestServer(t *testing.T, admissionError error) (*httptest.Server, *roomhub.Hub, *WebSocketHandler) {
 	return newWebSocketTestServerWithConfig(t, admissionError, webSocketTestConfig())
 }
@@ -194,10 +234,10 @@ func newWebSocketTestServerWithConfig(t *testing.T, admissionError error, cfg co
 	return server, hub, webSockets
 }
 
-type chatServiceStub struct{}
+type chatServiceStub struct{ err error }
 
-func (chatServiceStub) Accept(_ context.Context, _, _ uint64, messageID, _ string) (service.ChatAcceptance, error) {
-	return service.ChatAcceptance{MessageID: strings.ToLower(messageID), AcceptedAt: time.Now().UTC()}, nil
+func (s chatServiceStub) Accept(_ context.Context, _, _ uint64, messageID, _ string) (service.ChatAcceptance, error) {
+	return service.ChatAcceptance{MessageID: strings.ToLower(messageID), AcceptedAt: time.Now().UTC()}, s.err
 }
 
 func webSocketTestConfig() config.WebSocket {

@@ -294,10 +294,10 @@ The system provides at-least-once delivery with one logical database effect, not
 
 ### 5.6 Redis admission and failure behavior
 
-- Redis Lua scripts atomically enforce distributed token buckets for Chat users and Rooms.
+- One Redis Lua script atomically enforces a per-user-within-room token bucket and a Room token bucket using Redis server time.
 - Redis operations use a short deadline so WebSocket goroutines do not block on a degraded dependency.
-- Exceeding a healthy rate limit returns `429`.
-- If Redis cannot make a safe admission decision, new Chat sends return `503`.
+- Exceeding a healthy rate limit returns a rejected `chat.ack` with `CHAT_RATE_LIMITED`.
+- If Redis cannot make a safe admission decision, new Chat sends return a rejected `chat.ack` with `CHAT_UNAVAILABLE`.
 - Established WebSocket connections remain available for receiving events.
 - Redis recovery probes restore Chat admission automatically.
 - MySQL and RabbitMQ remain authoritative for durable state and accepted events.
@@ -385,7 +385,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, graceful shutdown, and bounded `chat.send` frame handling.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
-6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Confirmed Publish, `chat.ack`, and cross-instance broadcast are implemented. Redis admission, Inbox persistence, history, and bounded reconnect recovery remain.
+6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, and cross-instance broadcast are implemented. Inbox persistence, history, and bounded reconnect recovery remain.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 

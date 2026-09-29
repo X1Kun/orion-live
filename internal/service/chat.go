@@ -3,19 +3,23 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/messaging"
+	"github.com/X1Kun/orion-live/internal/metrics"
 )
 
 const maxChatContentRunes = 500
 
 var (
-	ErrInvalidChatMessageID = errors.New("message_id must be a UUIDv4")
-	ErrInvalidChatContent   = errors.New("content must contain 1 to 500 characters")
+	ErrInvalidChatMessageID     = errors.New("message_id must be a UUIDv4")
+	ErrInvalidChatContent       = errors.New("content must contain 1 to 500 characters")
+	ErrChatRateLimited          = errors.New("chat rate limit exceeded")
+	ErrChatAdmissionUnavailable = errors.New("chat admission is unavailable")
 )
 
 type ChatAcceptance struct {
@@ -31,13 +35,18 @@ type ChatEventPublisher interface {
 	Publish(context.Context, messaging.Event) error
 }
 
+type ChatAdmission interface {
+	Allow(context.Context, uint64, uint64) (bool, error)
+}
+
 type chatService struct {
+	admission ChatAdmission
 	publisher ChatEventPublisher
 	config    config.Chat
 }
 
-func NewChatService(publisher ChatEventPublisher, cfg config.Chat) ChatService {
-	return &chatService{publisher: publisher, config: cfg}
+func NewChatService(admission ChatAdmission, publisher ChatEventPublisher, cfg config.Chat) ChatService {
+	return &chatService{admission: admission, publisher: publisher, config: cfg}
 }
 
 func (s *chatService) Accept(ctx context.Context, liveSessionID, userID uint64, messageID, content string) (ChatAcceptance, error) {
@@ -48,6 +57,18 @@ func (s *chatService) Accept(ctx context.Context, liveSessionID, userID uint64, 
 	if !utf8.ValidString(content) || strings.TrimSpace(content) == "" || utf8.RuneCountInString(content) > maxChatContentRunes {
 		return ChatAcceptance{}, ErrInvalidChatContent
 	}
+	admissionCtx, cancelAdmission := context.WithTimeout(ctx, s.config.AdmissionTimeout)
+	allowed, err := s.admission.Allow(admissionCtx, liveSessionID, userID)
+	cancelAdmission()
+	if err != nil {
+		metrics.ChatAdmissionTotal.WithLabelValues("unavailable").Inc()
+		return ChatAcceptance{}, fmt.Errorf("%w: %v", ErrChatAdmissionUnavailable, err)
+	}
+	if !allowed {
+		metrics.ChatAdmissionTotal.WithLabelValues("rate_limited").Inc()
+		return ChatAcceptance{}, ErrChatRateLimited
+	}
+	metrics.ChatAdmissionTotal.WithLabelValues("allowed").Inc()
 
 	acceptedAt := time.Now().UTC()
 	event, err := messaging.NewChatMessageAcceptedEvent(liveSessionID, userID, messageID, content, acceptedAt)

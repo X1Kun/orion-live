@@ -78,6 +78,15 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=30
+      redis:
+        image: redis:7.4.11-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -92,6 +101,7 @@ jobs:
         env:
           ORION_TEST_MYSQL_DSN: "orion:ci-only-placeholder@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true"
           ORION_TEST_RABBITMQ_URL: "amqp://orion:ci-only-placeholder@127.0.0.1:5672/"
+          ORION_TEST_REDIS_URL: "redis://127.0.0.1:6379/0"
         run: make test-integration
 
   secrets:
