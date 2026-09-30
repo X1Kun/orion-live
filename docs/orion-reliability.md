@@ -100,11 +100,10 @@ HTTP / WebSocket Clients
                           │
              ┌────────────┴────────────────────┐
              ▼                                 ▼
-    per-API realtime queue            Persistence Queue
-             │                                 │
-             ▼                                 ├─▶ Retry Queue
-    Realtime Subscriber                        └─▶ DLQ
-             │                                 │
+    per-API realtime queue        Quorum Persistence Queue
+             │                       │ delayed retry │
+             ▼                       └───────────────┘──▶ Quorum DLQ
+    Realtime Subscriber                        │
              ▼                                 ▼
     WebSocket Hub / Rooms             Persistence Consumer
                                                │
@@ -122,7 +121,7 @@ The baseline deployment uses one RabbitMQ broker node. Durable queues and retain
 | --- | --- |
 | API Server | Authentication, validation, LiveSession mutations, WebSocket lifecycle, admission, and direct Chat publication. |
 | WebSocket Hub | Own process-local Rooms, bounded Client queues, slow-client removal, and graceful connection shutdown. |
-| Topology Initializer | Declare the exchange, durable processing queue, retry queue, DLQ, and required bindings idempotently. |
+| Topology Initializer | Declare the exchange, Quorum Persistence Queue, Quorum DLQ, and required bindings idempotently. |
 | Realtime Subscriber | Consume the API instance's ephemeral queue and deliver events to local Rooms. |
 | Outbox Relay | Lease committed events, relay them through the RabbitMQ Publisher, and use a claim token to fence stale Relay instances. |
 | Persistence Consumer | Persist Chat idempotently and acknowledge only after its local transaction commits. |
@@ -189,9 +188,9 @@ The core topology contains:
 one RabbitMQ broker node
 └─ orion.interaction.events
    ├─ one exclusive, auto-delete realtime queue per API instance
-   └─ one shared durable Persistence Queue
-      ├─ dedicated delayed Retry Queue
-      └─ dedicated DLQ
+   └─ one shared Quorum Persistence Queue
+      ├─ built-in delayed retry and delivery limit
+      └─ one Quorum DLQ
 ```
 
 - API instance count, logical queue count, and broker-node count are independent deployment dimensions.
@@ -205,11 +204,17 @@ one RabbitMQ broker node
 - Connections, channels, QoS, publishers, and Consumers are recreated with exponential backoff and jitter.
 - Orion uses one recovery owner: the application Client recreates connections, while Publisher and Consumer components recreate their channels. The experimental `amqp091-go` automatic Recovery mechanism remains disabled to avoid overlapping recovery state machines.
 - Consumer acknowledgements occur only after processing succeeds or an idempotent duplicate is proven safe.
-- Retryable failures enter the delayed retry queue with a bounded attempt count. Deterministic and exhausted failures enter the DLQ.
+- Retryable failures remain owned by the Persistence Queue and use bounded built-in delayed retry. Deterministic and exhausted failures enter the DLQ.
+- The Persistence Consumer uses RabbitMQ 4.3 Quorum Queue delayed retry. Transient failures use `basic.reject` with requeue enabled; RabbitMQ applies linear backoff and enforces the delivery limit without application-side republishing.
+- Chat content conflicts preserve the first committed message, emit an audit log and metric, and are dead-lettered without consuming the retry budget.
 
 Mandatory routing proves that at least one queue matched. It does not independently prove that every required queue was bound, so startup and periodic topology validation remain explicit reliability checks.
 
-The self-contained development topology declares retry TTL and dead-letter routing through queue `x-arguments`. Before a stable deployed queue becomes operational data, mutable TTL, DLX, and length settings move to RabbitMQ Policy managed by deployment IaC. Policies are not configured through the runtime AMQP identity.
+The self-contained development topology declares Quorum type, delayed retry, delivery limit, at-least-once dead lettering, and overflow behavior through queue `x-arguments`. Before a stable deployed queue becomes operational data, mutable retry, DLX, and overflow settings move to RabbitMQ Policy managed by deployment IaC. Queue length and disk-watermark limits remain deployment decisions until load evidence provides defensible values. Policies are not configured through the runtime AMQP identity.
+
+Queue type and declaration arguments must match an existing queue. Changing a development retry setting can therefore require draining and recreating the Persistence Queue until deployment-managed Policies own the mutable values. Migrating an operational Classic Queue to Quorum requires a controlled migration and is not performed automatically by the application.
+
+The local Compose broker has one RabbitMQ node, so its Quorum queues provide the queue-specific retry, delivery-limit, and dead-lettering behavior but no replicated node-failure tolerance. A production Quorum deployment normally uses at least three RabbitMQ nodes; that cluster is part of the deployment phase rather than local development.
 
 ### 5.3 `live_session.ended` Transactional Outbox
 
@@ -285,7 +290,7 @@ A finite recovery window cannot prove completeness without a persistence waterma
 - Durable Consumers store `UNIQUE(consumer_name, event_id)` Inbox records.
 - The Inbox insert and business mutation commit in the same MySQL transaction.
 - A duplicate Inbox key skips repeated business work and is acknowledged safely.
-- Retry and DLQ redrive preserve the original event identity, source time, idempotency key, and business identifiers.
+- Retry and DLQ redrive preserve the original event identity, source time, and business identifiers.
 - Automatic retry and supported redrive durations are bounded.
 - Inbox retention must outlive every supported automatic retry or redrive window.
 - Poison messages cannot block healthy queue traffic indefinitely.
@@ -385,7 +390,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, graceful shutdown, and bounded `chat.send` frame handling.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
-6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, and cross-instance broadcast are implemented. Inbox persistence, history, and bounded reconnect recovery remain.
+6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, and DLQ classification are implemented. History and bounded reconnect recovery remain.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 

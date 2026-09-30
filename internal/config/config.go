@@ -19,6 +19,7 @@ type Config struct {
 	RabbitMQ               RabbitMQ
 	Outbox                 Outbox
 	Chat                   Chat
+	Persistence            Persistence
 }
 
 func Load() (Config, error) {
@@ -50,6 +51,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	persistenceConfig, err := loadPersistence()
+	if err != nil {
+		return Config{}, err
+	}
 	dependencyInitTimeout, err := envDuration("DEPENDENCY_INIT_TIMEOUT", 10*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -76,6 +81,7 @@ func Load() (Config, error) {
 		RabbitMQ:               rabbitMQConfig,
 		Outbox:                 outboxConfig,
 		Chat:                   chatConfig,
+		Persistence:            persistenceConfig,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -134,6 +140,9 @@ func (c Config) Validate() error {
 		return errors.New("Chat admission and publish timeouts must fit within PROCESS_SHUTDOWN_TIMEOUT")
 	}
 	if err := c.Outbox.validate(); err != nil {
+		return err
+	}
+	if err := c.Persistence.validate(); err != nil {
 		return err
 	}
 	return nil

@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -24,5 +25,12 @@ func TestNewChatMessageAcceptedEvent(t *testing.T) {
 	}
 	if payload.MessageID != "018f47a2-8e31-4f10-8af0-2bdac5812501" || payload.Content != "hello" || payload.AcceptedAt != acceptedAt {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestNewChatMessageAcceptedEventRejectsInvalidPayload(t *testing.T) {
+	_, err := NewChatMessageAcceptedEvent(7, 42, "018f47a2-8e31-4f10-8af0-2bdac581250z", "hello", time.Now().UTC())
+	if !errors.Is(err, ErrInvalidChatPayload) {
+		t.Fatalf("error = %v, want %v", err, ErrInvalidChatPayload)
 	}
 }

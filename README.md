@@ -20,10 +20,12 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Versioned interaction events, durable RabbitMQ topology, and confirmed mandatory publication
 - Per-API realtime RabbitMQ subscription and process-local Hub delivery
 - Transactional `live_session.ended` Outbox with leased, fenced publication
+- Confirmed WebSocket Chat ingress with atomic Redis admission
+- Durable Chat persistence with Inbox deduplication, bounded retry, and DLQ handling
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-Persistent Chat, Redis admission, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+Chat history, bounded reconnect recovery, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -67,7 +69,7 @@ Useful endpoints:
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
 | `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
 
-The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. Connection limits are enforced per API instance; durable Chat persistence and history are added in the remaining Persistent Chat increments.
+The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. A durable Consumer persists accepted messages with Inbox and business-key idempotency. Connection limits are enforced per API instance; history and bounded reconnect recovery remain.
 
 Run the baseline quality gates without starting dependencies:
 

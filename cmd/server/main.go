@@ -16,6 +16,7 @@ import (
 	"github.com/X1Kun/orion-live/internal/health"
 	"github.com/X1Kun/orion-live/internal/messaging"
 	"github.com/X1Kun/orion-live/internal/outbox"
+	"github.com/X1Kun/orion-live/internal/persistence"
 	rabbitclient "github.com/X1Kun/orion-live/internal/rabbitmq"
 	"github.com/X1Kun/orion-live/internal/realtime"
 	"github.com/X1Kun/orion-live/internal/repository"
@@ -62,7 +63,7 @@ func main() {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq")
 	}
 	defer rabbitMQ.Close()
-	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, cfg.Persistence); err != nil {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
 	}
 	outboxPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
@@ -75,13 +76,13 @@ func main() {
 		logger.Log.WithError(err).Fatal("initialize Chat publisher")
 	}
 	defer chatPublisher.Close()
-
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, cfg.JWTSecret, cfg.AccessTokenTTL)
 	liveSessionRepo := repository.NewLiveSessionRepository(db)
 	liveSessionService := service.NewLiveSessionService(liveSessionRepo)
 	chatLimiter := admission.NewChatLimiter(redis, cfg.Chat)
 	chatService := service.NewChatService(chatLimiter, chatPublisher, cfg.Chat)
+	chatRepo := repository.NewChatRepository(db)
 	outboxRepo := repository.NewOutboxRepository(db)
 	instanceToken, err := messaging.NewCorrelationID()
 	if err != nil {
@@ -99,8 +100,14 @@ func main() {
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize realtime subscriber")
 	}
+	persistenceConsumer, err := persistence.StartConsumer(
+		startupCtx, rabbitMQ, chatRepo, cfg.Persistence,
+	)
+	if err != nil {
+		logger.Log.WithError(err).Fatal("initialize persistence consumer")
+	}
 	outboxRelay := outbox.StartRelay(outboxRepo, outboxPublisher, hostname+":"+instanceToken[:8], cfg.Outbox)
-	checker := health.NewChecker(sqlDB, redis, rabbitMQ, realtimeSubscriber)
+	checker := health.NewChecker(sqlDB, redis, rabbitMQ, realtimeSubscriber, persistenceConsumer)
 	webSocketHandler := handler.NewWebSocketHandler(liveSessionService, chatService, webSocketHub, cfg.WebSocket)
 	engine := router.New(
 		handler.NewUserHandler(userService),
@@ -141,7 +148,7 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), cfg.ProcessShutdownTimeout)
 	defer cancelShutdown()
 	var shutdownWG sync.WaitGroup
-	shutdownWG.Add(4)
+	shutdownWG.Add(5)
 	go func() {
 		defer shutdownWG.Done()
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -165,6 +172,12 @@ func main() {
 		defer shutdownWG.Done()
 		if err := realtimeSubscriber.Shutdown(shutdownCtx); err != nil {
 			logger.Log.WithError(err).Error("realtime subscriber shutdown did not complete")
+		}
+	}()
+	go func() {
+		defer shutdownWG.Done()
+		if err := persistenceConsumer.Shutdown(shutdownCtx); err != nil {
+			logger.Log.WithError(err).Error("persistence consumer shutdown did not complete")
 		}
 	}()
 	shutdownWG.Wait()

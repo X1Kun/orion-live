@@ -20,6 +20,7 @@ import (
 	rabbitclient "github.com/X1Kun/orion-live/internal/rabbitmq"
 	"github.com/X1Kun/orion-live/internal/realtime"
 	roomhub "github.com/X1Kun/orion-live/internal/websocket"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func TestRabbitMQTopologyPublisherAndReconnect(t *testing.T) {
@@ -35,10 +36,10 @@ func TestRabbitMQTopologyPublisherAndReconnect(t *testing.T) {
 		t.Fatalf("open RabbitMQ client: %v", err)
 	}
 	defer client.Close()
-	if err := rabbitclient.InitializeCoreTopology(ctx, client, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+	if err := rabbitclient.InitializeCoreTopology(ctx, client, persistenceIntegrationConfig()); err != nil {
 		t.Fatalf("initialize topology: %v", err)
 	}
-	if err := rabbitclient.InitializeCoreTopology(ctx, client, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+	if err := rabbitclient.InitializeCoreTopology(ctx, client, persistenceIntegrationConfig()); err != nil {
 		t.Fatalf("reinitialize topology: %v", err)
 	}
 	purgePersistenceQueue(t, ctx, client)
@@ -91,6 +92,105 @@ func TestRabbitMQTopologyPublisherAndReconnect(t *testing.T) {
 	assertQueuedEvent(t, reconnectCtx, client, second.EventID)
 }
 
+func TestPersistenceQuorumDelayedRetryAndDeadLetter(t *testing.T) {
+	cfg, ok := rabbitMQIntegrationConfig(t)
+	if !ok {
+		t.Skip("ORION_TEST_RABBITMQ_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client, err := rabbitclient.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open RabbitMQ client: %v", err)
+	}
+	defer client.Close()
+	persistenceCfg := persistenceIntegrationConfig()
+	if err := rabbitclient.InitializeCoreTopology(ctx, client, persistenceCfg); err != nil {
+		t.Fatalf("initialize topology: %v", err)
+	}
+	channel, err := client.Channel(ctx)
+	if err != nil {
+		t.Fatalf("open test channel: %v", err)
+	}
+	defer channel.Close()
+	if _, err := channel.QueuePurge(rabbitclient.PersistenceQueueName, false); err != nil {
+		t.Fatalf("purge persistence queue: %v", err)
+	}
+	if _, err := channel.QueuePurge(rabbitclient.PersistenceDeadLetterQueueName, false); err != nil {
+		t.Fatalf("purge persistence DLQ: %v", err)
+	}
+	realtimeQueue, err := channel.QueueDeclare("", false, true, true, false, amqp.Table{"x-queue-type": "classic"})
+	if err != nil {
+		t.Fatalf("declare realtime test queue: %v", err)
+	}
+	if err := channel.QueueBind(realtimeQueue.Name, string(messaging.EventTypeChatMessageAccepted), rabbitclient.InteractionExchangeName, false, nil); err != nil {
+		t.Fatalf("bind realtime test queue: %v", err)
+	}
+	realtimeDeliveries, err := channel.Consume(realtimeQueue.Name, "", true, true, false, false, nil)
+	if err != nil {
+		t.Fatalf("consume realtime test queue: %v", err)
+	}
+	persistenceDeliveries, err := channel.Consume(rabbitclient.PersistenceQueueName, "", false, false, false, false, nil)
+	if err != nil {
+		t.Fatalf("consume persistence queue: %v", err)
+	}
+	deadLetters, err := channel.Consume(rabbitclient.PersistenceDeadLetterQueueName, "", true, false, false, false, nil)
+	if err != nil {
+		t.Fatalf("consume persistence DLQ: %v", err)
+	}
+	publisher, err := rabbitclient.NewPublisher(ctx, client)
+	if err != nil {
+		t.Fatalf("create Publisher: %v", err)
+	}
+	defer publisher.Close()
+	event := integrationChatEvent(fmt.Sprintf("delayed-retry-%d", time.Now().UnixNano()))
+	if err := publisher.Publish(ctx, event); err != nil {
+		t.Fatalf("publish event: %v", err)
+	}
+	select {
+	case <-realtimeDeliveries:
+	case <-ctx.Done():
+		t.Fatal("realtime queue did not receive initial event")
+	}
+
+	deliveryTimes := make([]time.Time, 0, persistenceCfg.DeliveryLimit+1)
+	for {
+		select {
+		case delivery := <-persistenceDeliveries:
+			deliveryTimes = append(deliveryTimes, time.Now())
+			if err := delivery.Reject(true); err != nil {
+				t.Fatalf("reject persistence delivery: %v", err)
+			}
+		case deadLetter := <-deadLetters:
+			if deadLetter.MessageId != event.EventID {
+				t.Fatalf("DLQ event ID = %q, want %q", deadLetter.MessageId, event.EventID)
+			}
+			goto verifiedDeadLetter
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for DLQ after %d deliveries", len(deliveryTimes))
+		}
+	}
+
+verifiedDeadLetter:
+	if got, want := len(deliveryTimes), persistenceCfg.DeliveryLimit+1; got != want {
+		t.Fatalf("persistence deliveries = %d, want %d", got, want)
+	}
+	for i := 1; i < len(deliveryTimes); i++ {
+		minimum := persistenceCfg.RetryMinDelay * time.Duration(i)
+		if minimum > persistenceCfg.RetryMaxDelay {
+			minimum = persistenceCfg.RetryMaxDelay
+		}
+		if elapsed := deliveryTimes[i].Sub(deliveryTimes[i-1]); elapsed < minimum-75*time.Millisecond {
+			t.Fatalf("retry %d delay = %s, want at least approximately %s", i, elapsed, minimum)
+		}
+	}
+	select {
+	case duplicate := <-realtimeDeliveries:
+		t.Fatalf("realtime queue received retry duplicate with message ID %q", duplicate.MessageId)
+	case <-time.After(persistenceCfg.RetryMaxDelay + 100*time.Millisecond):
+	}
+}
+
 func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 	cfg, ok := rabbitMQIntegrationConfig(t)
 	if !ok {
@@ -104,7 +204,7 @@ func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 		t.Fatalf("open RabbitMQ client: %v", err)
 	}
 	defer client.Close()
-	if err := rabbitclient.InitializeCoreTopology(ctx, client, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+	if err := rabbitclient.InitializeCoreTopology(ctx, client, persistenceIntegrationConfig()); err != nil {
 		t.Fatalf("initialize topology: %v", err)
 	}
 	purgePersistenceQueue(t, ctx, client)
@@ -293,6 +393,14 @@ func integrationChatEvent(eventID string) messaging.Event {
 		LiveSessionID: 1,
 		OccurredAt:    time.Now().UTC(),
 		Payload:       json.RawMessage(`{"message_id":"message-1","content":"hello"}`),
+	}
+}
+
+func persistenceIntegrationConfig() config.Persistence {
+	return config.Persistence{
+		Prefetch: 8, ProcessingTimeout: time.Second,
+		RetryMinDelay: 200 * time.Millisecond, RetryMaxDelay: 400 * time.Millisecond,
+		DeliveryLimit: 3,
 	}
 }
 

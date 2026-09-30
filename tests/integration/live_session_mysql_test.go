@@ -44,7 +44,7 @@ func TestLiveSessionMigrationAndRepository(t *testing.T) {
 	if err := migrations.Up(ctx, sqlDB); err != nil {
 		t.Fatalf("reapply migrations: %v", err)
 	}
-	assertMigrationVersions(t, ctx, sqlDB, 1, 2, 3)
+	assertMigrationVersions(t, ctx, sqlDB, 1, 2, 3, 4)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger:         logger.Default.LogMode(logger.Silent),
