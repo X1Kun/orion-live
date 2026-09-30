@@ -80,7 +80,7 @@ func TestLiveSessionEndedOutboxEndToEnd(t *testing.T) {
 		t.Fatalf("open RabbitMQ: %v", err)
 	}
 	defer rabbitMQ.Close()
-	if err := rabbitclient.InitializeCoreTopology(ctx, rabbitMQ, rabbitclient.DefaultPersistenceRetryDelay); err != nil {
+	if err := rabbitclient.InitializeCoreTopology(ctx, rabbitMQ, persistenceIntegrationConfig()); err != nil {
 		t.Fatalf("topology: %v", err)
 	}
 	hub, err := roomhub.NewHub(8)

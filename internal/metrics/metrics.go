@@ -60,4 +60,19 @@ var (
 		prometheus.CounterOpts{Name: "orion_chat_admission_total", Help: "Total number of Chat admission decisions."},
 		[]string{"result"},
 	)
+
+	PersistenceEventsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "orion_persistence_events_total", Help: "Total number of persistence events handled by outcome."},
+		[]string{"result"},
+	)
+
+	PersistenceConsumerReady = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orion_persistence_consumer_ready",
+		Help: "Whether the durable persistence consumer is ready.",
+	})
+
+	ChatConflictsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "orion_chat_conflicts_total",
+		Help: "Total number of conflicting Chat messages rejected by the business key.",
+	})
 )

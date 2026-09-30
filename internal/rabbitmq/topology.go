@@ -2,50 +2,37 @@ package rabbitmq
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
+	"github.com/X1Kun/orion-live/internal/config"
 	"github.com/X1Kun/orion-live/internal/messaging"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const DefaultPersistenceRetryDelay = 5 * time.Second
-
 const (
 	InteractionExchangeName           = "orion.interaction.events"
 	PersistenceQueueName              = "orion.interaction.persistence"
-	PersistenceRetryExchangeName      = "orion.interaction.persistence.retry"
-	PersistenceRetryQueueName         = "orion.interaction.persistence.retry"
 	PersistenceDeadLetterExchangeName = "orion.interaction.persistence.dlx"
 	PersistenceDeadLetterQueueName    = "orion.interaction.persistence.dlq"
 )
 
-var ErrInvalidRetryDelay = errors.New("persistence retry delay must be positive")
-
-func InitializeCoreTopology(ctx context.Context, client *Client, retryDelay time.Duration) error {
+func InitializeCoreTopology(ctx context.Context, client *Client, cfg config.Persistence) error {
 	channel, err := client.Channel(ctx)
 	if err != nil {
 		return err
 	}
 	defer channel.Close()
-	return DeclareCoreTopology(channel, retryDelay)
+	return DeclareCoreTopology(channel, cfg)
 }
 
-func DeclareCoreTopology(channel *amqp.Channel, retryDelay time.Duration) error {
-	if retryDelay <= 0 {
-		return ErrInvalidRetryDelay
-	}
+func DeclareCoreTopology(channel *amqp.Channel, cfg config.Persistence) error {
 	if err := declareInteractionExchange(channel); err != nil {
 		return err
 	}
 	if err := declarePersistenceDeadLetterPath(channel); err != nil {
 		return err
 	}
-	if err := declarePersistenceRetryPath(channel, retryDelay); err != nil {
-		return err
-	}
-	return declarePersistenceConsumerPath(channel)
+	return declarePersistenceConsumerPath(channel, cfg)
 }
 
 func declareInteractionExchange(channel *amqp.Channel) error {
@@ -65,7 +52,7 @@ func declarePersistenceDeadLetterPath(channel *amqp.Channel) error {
 		false,
 		false,
 		false,
-		amqp.Table{"x-queue-type": "classic"},
+		amqp.Table{"x-queue-type": "quorum"},
 	); err != nil {
 		return fmt.Errorf("declare persistence DLQ: %w", err)
 	}
@@ -81,41 +68,16 @@ func declarePersistenceDeadLetterPath(channel *amqp.Channel) error {
 	return nil
 }
 
-func declarePersistenceRetryPath(channel *amqp.Channel, retryDelay time.Duration) error {
-	if err := channel.ExchangeDeclare(PersistenceRetryExchangeName, "topic", true, false, false, false, nil); err != nil {
-		return fmt.Errorf("declare persistence retry exchange: %w", err)
-	}
-	retryArguments := amqp.Table{
-		"x-queue-type":           "classic",
-		"x-message-ttl":          retryDelay.Milliseconds(),
-		"x-dead-letter-exchange": InteractionExchangeName,
-	}
-	if _, err := channel.QueueDeclare(
-		PersistenceRetryQueueName,
-		true,
-		false,
-		false,
-		false,
-		retryArguments,
-	); err != nil {
-		return fmt.Errorf("declare persistence retry queue: %w", err)
-	}
-	if err := channel.QueueBind(
-		PersistenceRetryQueueName,
-		"#",
-		PersistenceRetryExchangeName,
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("bind persistence retry queue: %w", err)
-	}
-	return nil
-}
-
-func declarePersistenceConsumerPath(channel *amqp.Channel) error {
+func declarePersistenceConsumerPath(channel *amqp.Channel, cfg config.Persistence) error {
 	persistenceArguments := amqp.Table{
-		"x-queue-type":           "classic",
+		"x-queue-type":           "quorum",
+		"x-delayed-retry-type":   "failed",
+		"x-delayed-retry-min":    cfg.RetryMinDelay.Milliseconds(),
+		"x-delayed-retry-max":    cfg.RetryMaxDelay.Milliseconds(),
+		"x-delivery-limit":       cfg.DeliveryLimit,
 		"x-dead-letter-exchange": PersistenceDeadLetterExchangeName,
+		"x-dead-letter-strategy": "at-least-once",
+		"x-overflow":             "reject-publish",
 	}
 	if _, err := channel.QueueDeclare(
 		PersistenceQueueName,
