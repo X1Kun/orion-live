@@ -27,6 +27,20 @@ type ChatPersistenceRepository interface {
 
 type ChatHistoryRepository interface {
 	ListAfter(ctx context.Context, liveSessionID, afterID uint64, limit int) ([]model.ChatMessage, error)
+	ListLatest(ctx context.Context, liveSessionID uint64, limit int) ([]model.ChatMessage, error)
+}
+
+func (r *chatRepository) ListLatest(ctx context.Context, liveSessionID uint64, limit int) ([]model.ChatMessage, error) {
+	var messages []model.ChatMessage
+	err := r.db.WithContext(ctx).
+		Where("live_session_id = ?", liveSessionID).
+		Order("id DESC").
+		Limit(limit).
+		Find(&messages).Error
+	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+		messages[left], messages[right] = messages[right], messages[left]
+	}
+	return messages, err
 }
 
 type chatRepository struct{ db *gorm.DB }

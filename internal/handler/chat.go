@@ -68,22 +68,22 @@ func (h *ChatHandler) History(c *gin.Context) {
 	})
 }
 
-func chatHistoryQuery(c *gin.Context) (uint64, int, bool) {
-	var afterID uint64
+func chatHistoryQuery(c *gin.Context) (*uint64, int, bool) {
+	var afterID *uint64
 	if raw := c.Query("after_id"); raw != "" {
 		parsed, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
 			sendError(c, http.StatusBadRequest, "INVALID_REQUEST", "after_id must be a non-negative integer")
-			return 0, 0, false
+			return nil, 0, false
 		}
-		afterID = parsed
+		afterID = &parsed
 	}
 	var limit int
 	if raw := c.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
 			sendError(c, http.StatusBadRequest, "INVALID_REQUEST", "limit must be a positive integer")
-			return 0, 0, false
+			return nil, 0, false
 		}
 		limit = parsed
 	}

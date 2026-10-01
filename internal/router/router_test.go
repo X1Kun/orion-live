@@ -93,7 +93,7 @@ func (routerChatServiceStub) Accept(context.Context, uint64, uint64, string, str
 
 type routerChatHistoryServiceStub struct{}
 
-func (routerChatHistoryServiceStub) History(context.Context, uint64, uint64, int) (service.ChatHistoryPage, error) {
+func (routerChatHistoryServiceStub) History(context.Context, uint64, *uint64, int) (service.ChatHistoryPage, error) {
 	return service.ChatHistoryPage{}, nil
 }
 

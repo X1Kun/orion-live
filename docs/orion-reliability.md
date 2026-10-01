@@ -244,6 +244,7 @@ The realtime subscriber uses `live_session.ended` to close the local send gate a
 Client frames use the following initial protocol:
 
 ```json
+{"type":"room.ready","live_session_id":7}
 {"type":"chat.send","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","content":"hello"}
 {"type":"chat.ack","message_id":"018f47a2-8e31-4f10-8af0-2bdac5812501","status":"accepted","accepted_at":"2026-09-28T01:02:03Z"}
 ```
@@ -281,9 +282,9 @@ ORDER BY id
 LIMIT ?
 ```
 
-Authenticated Clients call `GET /api/v1/live-sessions/:id/messages?after_id=<cursor>&limit=<1..100>`. Results are ordered by the auto-increment row ID, return at most 100 messages, and include `next_cursor` plus `has_more`. An empty page preserves the requested cursor.
+Authenticated Clients call `GET /api/v1/live-sessions/:id/messages?after_id=<cursor>&limit=<1..100>`. Results are ordered by the auto-increment row ID, return at most 100 messages, and include `next_cursor` plus `has_more`. An empty page preserves the requested cursor. Omitting `after_id` returns the most recent page in ascending order for initial room context; explicitly sending `after_id=0` scans forward from the beginning.
 
-Joining Clients fetch recent context. Reconnecting Clients query after their last cursor several times within a bounded recovery window and merge WebSocket and HTTP copies by `(live_session_id, user_id, message_id)`.
+After the WebSocket upgrade, the server emits `room.ready` only after the Client has joined the process-local Room. A joining or reconnecting Client buffers realtime events, fetches recent context or queries after its last persisted cursor, repeats the forward query within a bounded recovery window, and merges WebSocket and HTTP copies by `(live_session_id, user_id, message_id)`. The server does not query MySQL and push history through the WebSocket connection.
 
 A finite recovery window cannot prove completeness without a persistence watermark. Later history refreshes may discover messages that persisted after the window.
 
@@ -392,7 +393,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, graceful shutdown, and bounded `chat.send` frame handling.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
-6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, DLQ classification, and cursor-based history are implemented. Bounded reconnect recovery remains.
+6. **Persistent Chat — implemented baseline:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, DLQ classification, cursor-based history, `room.ready`, and bounded reconnect recovery are implemented. Recovery remains finite and does not claim watermark-backed completeness.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 
