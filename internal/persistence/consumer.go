@@ -28,7 +28,7 @@ var ErrConsumerNotReady = errors.New("persistence consumer is not ready")
 
 type Consumer struct {
 	client     *rabbitclient.Client
-	repository repository.ChatRepository
+	repository repository.ChatPersistenceRepository
 	config     config.Persistence
 
 	ctx    context.Context
@@ -46,7 +46,7 @@ type consumerSession struct {
 func StartConsumer(
 	ctx context.Context,
 	client *rabbitclient.Client,
-	repository repository.ChatRepository,
+	repository repository.ChatPersistenceRepository,
 	cfg config.Persistence,
 ) (*Consumer, error) {
 	runCtx, cancel := context.WithCancel(context.Background())

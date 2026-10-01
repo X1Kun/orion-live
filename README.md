@@ -22,10 +22,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Transactional `live_session.ended` Outbox with leased, fenced publication
 - Confirmed WebSocket Chat ingress with atomic Redis admission
 - Durable Chat persistence with Inbox deduplication, bounded retry, and DLQ handling
+- Authenticated Chat history with stable cursor pagination
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-Chat history, bounded reconnect recovery, and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+Bounded reconnect recovery and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -67,9 +68,10 @@ Useful endpoints:
 | `GET` | `/api/v1/live-sessions/:id` | Read a live session |
 | `POST` | `/api/v1/live-sessions/:id/start` | Start a scheduled live session |
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
+| `GET` | `/api/v1/live-sessions/:id/messages?after_id=0&limit=50` | Read persisted Chat history |
 | `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
 
-The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. A durable Consumer persists accepted messages with Inbox and business-key idempotency. Connection limits are enforced per API instance; history and bounded reconnect recovery remain.
+The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. A durable Consumer persists accepted messages with Inbox and business-key idempotency, and authenticated Clients can recover persisted messages through cursor-based history. Connection limits are enforced per API instance; bounded reconnect recovery remains.
 
 Run the baseline quality gates without starting dependencies:
 
@@ -82,6 +84,7 @@ Run the infrastructure integration tests against dedicated MySQL and RabbitMQ in
 ```bash
 ORION_TEST_MYSQL_DSN='orion:password@tcp(127.0.0.1:3306)/orion_test?charset=utf8mb4&parseTime=true&loc=UTC&multiStatements=true' \
 ORION_TEST_RABBITMQ_URL='amqp://orion:password@127.0.0.1:5672/' \
+ORION_TEST_REDIS_URL='redis://:password@127.0.0.1:6379/0' \
   make test-integration
 ```
 

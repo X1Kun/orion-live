@@ -255,7 +255,7 @@ WebSocket chat.send with client-generated message_id
 → obtain user_id from the authenticated connection
 → validate frame and apply Redis admission
 → capture accepted_at once in UTC
-→ derive stable event_id
+→ generate event_id once for this publication attempt
 → publish chat.message.accepted
 → verify routing and wait for Publisher Confirm
 → return chat.ack(status = accepted)
@@ -280,6 +280,8 @@ WHERE live_session_id = ? AND id > ?
 ORDER BY id
 LIMIT ?
 ```
+
+Authenticated Clients call `GET /api/v1/live-sessions/:id/messages?after_id=<cursor>&limit=<1..100>`. Results are ordered by the auto-increment row ID, return at most 100 messages, and include `next_cursor` plus `has_more`. An empty page preserves the requested cursor.
 
 Joining Clients fetch recent context. Reconnecting Clients query after their last cursor several times within a bounded recovery window and merge WebSocket and HTTP copies by `(live_session_id, user_id, message_id)`.
 
@@ -390,7 +392,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 3. **WebSocket safety — implemented baseline:** authenticated upgrade, `LIVE` admission, bounded Hub/Room/Client queues, connection limits, heartbeats, origin checks, race tests, graceful shutdown, and bounded `chat.send` frame handling.
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
-6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, and DLQ classification are implemented. History and bounded reconnect recovery remain.
+6. **Persistent Chat — in progress:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, DLQ classification, and cursor-based history are implemented. Bounded reconnect recovery remains.
 7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 
