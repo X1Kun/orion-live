@@ -84,6 +84,12 @@ func (h *WebSocketHandler) Connect(c *gin.Context) {
 		logger.Log.WithError(err).Warn("join WebSocket room")
 		return
 	}
+	if err := writeRoomReady(connection, liveSessionID, h.config.WriteTimeout); err != nil {
+		h.hub.Leave(liveSessionID, client)
+		_ = connection.Close()
+		logger.Log.WithError(err).Debug("write WebSocket room ready")
+		return
+	}
 	metrics.WebSocketConnections.Inc()
 	defer metrics.WebSocketConnections.Dec()
 

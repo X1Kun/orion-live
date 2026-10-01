@@ -22,7 +22,7 @@ type ChatHistoryPage struct {
 }
 
 type ChatHistoryService interface {
-	History(ctx context.Context, liveSessionID, afterID uint64, limit int) (ChatHistoryPage, error)
+	History(ctx context.Context, liveSessionID uint64, afterID *uint64, limit int) (ChatHistoryPage, error)
 }
 
 type LiveSessionReader interface {
@@ -38,7 +38,7 @@ func NewChatHistoryService(sessions LiveSessionReader, messages repository.ChatH
 	return &chatHistoryService{sessions: sessions, messages: messages}
 }
 
-func (s *chatHistoryService) History(ctx context.Context, liveSessionID, afterID uint64, limit int) (ChatHistoryPage, error) {
+func (s *chatHistoryService) History(ctx context.Context, liveSessionID uint64, afterID *uint64, limit int) (ChatHistoryPage, error) {
 	if limit == 0 {
 		limit = defaultChatHistoryLimit
 	}
@@ -48,7 +48,18 @@ func (s *chatHistoryService) History(ctx context.Context, liveSessionID, afterID
 	if _, err := s.sessions.Get(ctx, liveSessionID); err != nil {
 		return ChatHistoryPage{}, err
 	}
-	messages, err := s.messages.ListAfter(ctx, liveSessionID, afterID, limit+1)
+	if afterID == nil {
+		messages, err := s.messages.ListLatest(ctx, liveSessionID, limit)
+		if err != nil {
+			return ChatHistoryPage{}, err
+		}
+		var nextCursor uint64
+		if len(messages) > 0 {
+			nextCursor = messages[len(messages)-1].ID
+		}
+		return ChatHistoryPage{Messages: messages, NextCursor: nextCursor}, nil
+	}
+	messages, err := s.messages.ListAfter(ctx, liveSessionID, *afterID, limit+1)
 	if err != nil {
 		return ChatHistoryPage{}, err
 	}
@@ -56,7 +67,7 @@ func (s *chatHistoryService) History(ctx context.Context, liveSessionID, afterID
 	if hasMore {
 		messages = messages[:limit]
 	}
-	nextCursor := afterID
+	nextCursor := *afterID
 	if len(messages) > 0 {
 		nextCursor = messages[len(messages)-1].ID
 	}

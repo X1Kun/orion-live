@@ -74,6 +74,10 @@ func TestChatHistoryRepositoryUsesAscendingCursor(t *testing.T) {
 	if len(secondPage) != 2 || secondPage[0].Content != "second" || secondPage[1].Content != "third" || secondPage[0].ID >= secondPage[1].ID {
 		t.Fatalf("unexpected second page: %#v", secondPage)
 	}
+	latest, err := repo.ListLatest(ctx, uint64(sessionID), 2)
+	if err != nil || len(latest) != 2 || latest[0].Content != "second" || latest[1].Content != "third" {
+		t.Fatalf("latest ListLatest() = %#v, %v", latest, err)
+	}
 	empty, err := repo.ListAfter(ctx, uint64(sessionID), secondPage[1].ID, 10)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty ListAfter() = %#v, %v", empty, err)

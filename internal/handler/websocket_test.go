@@ -66,6 +66,7 @@ func TestWebSocketConnectJoinsHubAndReceivesBroadcast(t *testing.T) {
 		t.Fatalf("Dial() error = %v, response status = %v", err, responseStatus(response))
 	}
 	defer connection.Close()
+	readRoomReady(t, connection, 7)
 
 	waitForWebSocketTest(t, func() bool { return hub.ClientCount(7) == 1 }, "client to join room")
 	present, err := hub.BroadcastIfPresent(7, []byte(`{"type":"test.event"}`))
@@ -116,6 +117,7 @@ func TestWebSocketHubShutdownClosesConnection(t *testing.T) {
 		t.Fatalf("Dial() error = %v, response status = %v", err, responseStatus(response))
 	}
 	defer connection.Close()
+	readRoomReady(t, connection, 7)
 	waitForWebSocketTest(t, func() bool { return hub.ClientCount(7) == 1 }, "client to join room")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -261,7 +263,23 @@ func dialWebSocketTest(t *testing.T, serverURL string, liveSessionID, userID uin
 	if err != nil {
 		t.Fatalf("Dial() error = %v, response status = %v", err, responseStatus(response))
 	}
+	readRoomReady(t, connection, liveSessionID)
 	return connection
+}
+
+func readRoomReady(t *testing.T, connection *gorilla.Conn, liveSessionID uint64) {
+	t.Helper()
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	messageType, body, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatalf("read room.ready: %v", err)
+	}
+	want := `{"type":"room.ready","live_session_id":` + strconv.FormatUint(liveSessionID, 10) + `}`
+	if messageType != gorilla.TextMessage || string(body) != want {
+		t.Fatalf("room.ready type = %d, body = %s, want %s", messageType, body, want)
+	}
 }
 
 func assertWebSocketHandshakeStatus(t *testing.T, serverURL string, liveSessionID, userID uint64, wantStatus int) {

@@ -156,9 +156,14 @@ type chatPersistenceFixture struct {
 	db         *gorm.DB
 	rabbitMQ   *rabbitclient.Client
 	publisher  *rabbitclient.Publisher
-	repository repository.ChatPersistenceRepository
+	repository chatPersistenceAndHistoryRepository
 	userID     uint64
 	sessionID  uint64
+}
+
+type chatPersistenceAndHistoryRepository interface {
+	repository.ChatPersistenceRepository
+	repository.ChatHistoryRepository
 }
 
 func newChatPersistenceFixture(t *testing.T) *chatPersistenceFixture {

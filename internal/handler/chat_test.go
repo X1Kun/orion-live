@@ -31,8 +31,8 @@ func TestChatHistoryHandlerReturnsCursorPage(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if history.liveSessionID != 7 || history.afterID != 10 || history.limit != 1 {
-		t.Fatalf("history query = session:%d after:%d limit:%d", history.liveSessionID, history.afterID, history.limit)
+	if history.liveSessionID != 7 || history.afterID == nil || *history.afterID != 10 || history.limit != 1 {
+		t.Fatalf("history query = session:%d after:%v limit:%d", history.liveSessionID, history.afterID, history.limit)
 	}
 	for _, fragment := range []string{`"id":11`, `"message_id":"message"`, `"next_cursor":11`, `"has_more":true`} {
 		if !strings.Contains(response.Body.String(), fragment) {
@@ -95,11 +95,11 @@ type chatHistoryServiceStub struct {
 	page          service.ChatHistoryPage
 	err           error
 	liveSessionID uint64
-	afterID       uint64
+	afterID       *uint64
 	limit         int
 }
 
-func (s *chatHistoryServiceStub) History(_ context.Context, liveSessionID, afterID uint64, limit int) (service.ChatHistoryPage, error) {
+func (s *chatHistoryServiceStub) History(_ context.Context, liveSessionID uint64, afterID *uint64, limit int) (service.ChatHistoryPage, error) {
 	s.liveSessionID, s.afterID, s.limit = liveSessionID, afterID, limit
 	return s.page, s.err
 }

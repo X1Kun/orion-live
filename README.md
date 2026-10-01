@@ -23,10 +23,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Confirmed WebSocket Chat ingress with atomic Redis admission
 - Durable Chat persistence with Inbox deduplication, bounded retry, and DLQ handling
 - Authenticated Chat history with stable cursor pagination
+- `room.ready` synchronization and bounded reconnect recovery coverage
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
 
-Bounded reconnect recovery and deployment evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+Operational deployment and failure evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -68,10 +69,10 @@ Useful endpoints:
 | `GET` | `/api/v1/live-sessions/:id` | Read a live session |
 | `POST` | `/api/v1/live-sessions/:id/start` | Start a scheduled live session |
 | `POST` | `/api/v1/live-sessions/:id/end` | End a live session |
-| `GET` | `/api/v1/live-sessions/:id/messages?after_id=0&limit=50` | Read persisted Chat history |
+| `GET` | `/api/v1/live-sessions/:id/messages?limit=50` | Read recent persisted Chat history |
 | `GET` | `/api/v1/live-sessions/:id/ws` | Join a live room through a WebSocket upgrade |
 
-The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. It applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. A durable Consumer persists accepted messages with Inbox and business-key idempotency, and authenticated Clients can recover persisted messages through cursor-based history. Connection limits are enforced per API instance; bounded reconnect recovery remains.
+The current WebSocket endpoint requires a Bearer token in the upgrade request and accepts only `LIVE` sessions. After joining the process-local Room it emits `room.ready`, applies atomic Redis admission to validated `chat.send` frames, publishes `chat.message.accepted` with RabbitMQ confirms, and returns `chat.ack` only after successful publication. A durable Consumer persists accepted messages with Inbox and business-key idempotency. Clients combine buffered realtime events with bounded cursor-based History queries to repair join and reconnect gaps.
 
 Run the baseline quality gates without starting dependencies:
 
