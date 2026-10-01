@@ -156,7 +156,7 @@ type chatPersistenceFixture struct {
 	db         *gorm.DB
 	rabbitMQ   *rabbitclient.Client
 	publisher  *rabbitclient.Publisher
-	repository repository.ChatRepository
+	repository repository.ChatPersistenceRepository
 	userID     uint64
 	sessionID  uint64
 }
@@ -295,7 +295,7 @@ func (f *chatPersistenceFixture) queueMessages(t *testing.T, queue string) int {
 	return state.Messages
 }
 
-func startPersistenceConsumer(t *testing.T, fixture *chatPersistenceFixture, repo repository.ChatRepository) {
+func startPersistenceConsumer(t *testing.T, fixture *chatPersistenceFixture, repo repository.ChatPersistenceRepository) {
 	t.Helper()
 	consumer, err := persistence.StartConsumer(fixture.ctx, fixture.rabbitMQ, repo, persistenceIntegrationConfig())
 	if err != nil {
@@ -362,7 +362,7 @@ func decodeChatPayload(t *testing.T, event messaging.Event) messaging.ChatMessag
 }
 
 type failOnceChatRepository struct {
-	delegate repository.ChatRepository
+	delegate repository.ChatPersistenceRepository
 	mu       sync.Mutex
 	calls    int
 	first    time.Time

@@ -21,14 +21,28 @@ const (
 	ChatConflictingMessage ChatPersistenceResult = "conflicting_message"
 )
 
-type ChatRepository interface {
+type ChatPersistenceRepository interface {
 	Persist(ctx context.Context, consumerName string, event messaging.Event, payload messaging.ChatMessageAcceptedPayload) (ChatPersistenceResult, error)
+}
+
+type ChatHistoryRepository interface {
+	ListAfter(ctx context.Context, liveSessionID, afterID uint64, limit int) ([]model.ChatMessage, error)
 }
 
 type chatRepository struct{ db *gorm.DB }
 
-func NewChatRepository(db *gorm.DB) ChatRepository {
+func NewChatRepository(db *gorm.DB) *chatRepository {
 	return &chatRepository{db: db}
+}
+
+func (r *chatRepository) ListAfter(ctx context.Context, liveSessionID, afterID uint64, limit int) ([]model.ChatMessage, error) {
+	var messages []model.ChatMessage
+	err := r.db.WithContext(ctx).
+		Where("live_session_id = ? AND id > ?", liveSessionID, afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&messages).Error
+	return messages, err
 }
 
 func (r *chatRepository) Persist(

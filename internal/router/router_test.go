@@ -50,6 +50,7 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 	engine := New(
 		handler.NewUserHandler(&routerUserServiceStub{}),
 		handler.NewLiveSessionHandler(liveSessions),
+		handler.NewChatHandler(routerChatHistoryServiceStub{}),
 		webSockets,
 		handler.NewHealthHandler(routerReadinessCheckerStub{}, 0),
 		"test-secret-with-at-least-32-characters",
@@ -68,6 +69,7 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/live-sessions"},
 		{method: http.MethodPost, path: "/api/v1/live-sessions/1/start"},
 		{method: http.MethodPost, path: "/api/v1/live-sessions/1/end"},
+		{method: http.MethodGet, path: "/api/v1/live-sessions/1/messages"},
 		{method: http.MethodGet, path: "/api/v1/live-sessions/1/ws"},
 	}
 	for _, route := range protectedRoutes {
@@ -87,6 +89,12 @@ type routerChatServiceStub struct{}
 
 func (routerChatServiceStub) Accept(context.Context, uint64, uint64, string, string) (service.ChatAcceptance, error) {
 	return service.ChatAcceptance{}, nil
+}
+
+type routerChatHistoryServiceStub struct{}
+
+func (routerChatHistoryServiceStub) History(context.Context, uint64, uint64, int) (service.ChatHistoryPage, error) {
+	return service.ChatHistoryPage{}, nil
 }
 
 type routerUserServiceStub struct{}

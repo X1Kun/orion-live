@@ -83,6 +83,7 @@ func main() {
 	chatLimiter := admission.NewChatLimiter(redis, cfg.Chat)
 	chatService := service.NewChatService(chatLimiter, chatPublisher, cfg.Chat)
 	chatRepo := repository.NewChatRepository(db)
+	chatHistoryService := service.NewChatHistoryService(liveSessionService, chatRepo)
 	outboxRepo := repository.NewOutboxRepository(db)
 	instanceToken, err := messaging.NewCorrelationID()
 	if err != nil {
@@ -112,6 +113,7 @@ func main() {
 	engine := router.New(
 		handler.NewUserHandler(userService),
 		handler.NewLiveSessionHandler(liveSessionService),
+		handler.NewChatHandler(chatHistoryService),
 		webSocketHandler,
 		handler.NewHealthHandler(checker, time.Second),
 		cfg.JWTSecret,
