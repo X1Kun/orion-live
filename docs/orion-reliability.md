@@ -34,7 +34,7 @@ The project intentionally favors one complete, measurable interaction path over 
 | Chat history | Provide cursor-based history for room entry and bounded reconnect reconciliation. |
 | Rate limiting | Enforce distributed Chat admission through Redis and fail closed when the limiter cannot provide a safe answer. |
 | Operations | Expose bounded-cardinality metrics, structured logs, health signals, graceful shutdown, and repeatable failure evidence. |
-| Deployment exercise | Run at least two API replicas and a Worker in one container orchestration environment with probes, resource bounds, and graceful rollout settings. |
+| Deployment exercise | Run at least two API replicas with their co-located background components in one container orchestration environment with probes, resource bounds, and graceful rollout settings. |
 
 ### Optional extensions
 
@@ -331,7 +331,7 @@ High-cardinality identifiers such as `user_id`, `message_id`, and `event_id` nev
 
 The deployment exercise must demonstrate:
 
-- Two API replicas and at least one Worker
+- Two API replicas with process-local Realtime Subscribers and competing Persistence Consumers and Outbox Relays
 - Liveness and readiness probes
 - Resource requests and limits
 - Secrets supplied outside the image
@@ -394,7 +394,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
 6. **Persistent Chat — implemented baseline:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, DLQ classification, cursor-based history, `room.ready`, and bounded reconnect recovery are implemented. Recovery remains finite and does not claim watermark-backed completeness.
-7. **Operational deployment:** two API replicas, Worker lifecycle, orchestration manifests, probes, resources, rollout behavior, metrics, load tests, and failure injection.
+7. **Operational deployment — implemented baseline:** the two-replica API Deployment, independent Migration Job, Service, probes, resource bounds, Pod security context, disruption budget, rolling-update policy, single-replica development dependencies, and Kind E2E/resilience harness are implemented and verified from a clean three-node cluster. The API replicas run on different workers while dynamically provisioned local-path volumes and dependency Pods remain pinned to one labeled storage worker. Selective node image loading avoids unrelated copies. Independent Smoke and Resilience suites run on pull requests versus main/scheduled CI. The evidence covers fixed-Pod cross-node Chat, MySQL/Inbox uniqueness, Pod replacement, cursor recovery, Redis fail-closed behavior, RabbitMQ recovery, MySQL readiness endpoint removal, final History/Inbox recovery, and PDB enforcement through the Eviction API. Prometheus/Grafana integration and measured load evidence remain.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 
 Each roadmap item includes implementation, focused tests, operational metrics, failure behavior, and documentation. A new business feature does not create a second messaging framework.
