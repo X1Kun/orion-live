@@ -1,4 +1,4 @@
-.PHONY: build check test-integration compose-config migrate up down logs
+.PHONY: build check test-integration compose-config k8s-render kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete migrate up down logs
 
 build:
 	go build ./cmd/server ./cmd/migrate
@@ -17,6 +17,32 @@ test-integration:
 
 compose-config:
 	docker compose config --quiet
+
+k8s-render:
+	kubectl kustomize deploy/k8s/base >/dev/null
+	kubectl kustomize deploy/k8s/migration >/dev/null
+	kubectl kustomize deploy/k8s/dev >/dev/null
+	kubectl kustomize deploy/k8s/overlays/kind >/dev/null
+
+kind-create:
+	./scripts/kind/create.sh
+
+kind-deploy:
+	./scripts/kind/deploy.sh
+
+kind-smoke:
+	./scripts/kind/test.sh smoke
+
+kind-resilience:
+	./scripts/kind/test.sh resilience
+
+kind-test:
+	./scripts/kind/test.sh all
+
+kind-e2e: kind-create kind-deploy kind-test
+
+kind-delete:
+	./scripts/kind/delete.sh
 
 migrate:
 	docker compose run --rm migrate

@@ -11,11 +11,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/orion-a
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates \
-    && addgroup -S orion \
-    && adduser -S -G orion orion
+    && addgroup -S -g 10001 orion \
+    && adduser -S -D -H -u 10001 -G orion orion
 COPY --from=build /out/orion-api /usr/local/bin/orion-api
 COPY --from=build /out/orion-migrate /usr/local/bin/orion-migrate
 
-USER orion
+USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/orion-api"]

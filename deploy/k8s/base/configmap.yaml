@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orion-runtime-config
+  namespace: orion-live
+  labels:
+    app.kubernetes.io/name: orion-live
+data:
+  APP_ENV: production
+  HTTP_ADDRESS: :8080
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_NAME: orion
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_VHOST: /
+  DEPENDENCY_INIT_TIMEOUT: 15s
+  PROCESS_SHUTDOWN_TIMEOUT: 10s
+  CHAT_ADMISSION_TIMEOUT: 100ms

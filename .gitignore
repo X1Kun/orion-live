@@ -9,6 +9,8 @@
 .env
 .env.*
 !.env.example
+deploy/k8s/base/secret.yaml
+deploy/k8s/dev/infrastructure-secret.yaml
 
 .idea/
 .vscode/

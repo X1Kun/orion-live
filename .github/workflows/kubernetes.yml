@@ -1,0 +1,108 @@
+name: Kubernetes evidence
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kubernetes-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ORION_KIND_CLUSTER: orion-smoke
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Set up Kind and kubectl
+        uses: helm/kind-action@v1.14.0
+        with:
+          install_only: true
+          version: v0.22.0
+          kubectl_version: v1.29.2
+
+      - name: Raise inotify limits
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1024
+          sudo sysctl -w fs.inotify.max_user_watches=524288
+
+      - name: Deploy Kind environment
+        run: make kind-create kind-deploy
+
+      - name: Run Kubernetes Smoke
+        run: make kind-smoke
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl -n orion-live get pods,deployments,statefulsets,pvc,events -o wide || true
+          kubectl -n orion-live logs -l app.kubernetes.io/name=orion-live --all-containers --tail=200 || true
+
+      - name: Delete Kind cluster
+        if: always()
+        run: make kind-delete
+
+  kind-resilience:
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ORION_KIND_CLUSTER: orion-resilience
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Set up Kind and kubectl
+        uses: helm/kind-action@v1.14.0
+        with:
+          install_only: true
+          version: v0.22.0
+          kubectl_version: v1.29.2
+
+      - name: Raise inotify limits
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1024
+          sudo sysctl -w fs.inotify.max_user_watches=524288
+
+      - name: Deploy Kind environment
+        run: make kind-create kind-deploy
+
+      - name: Run Kubernetes Resilience
+        run: make kind-resilience
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl -n orion-live get pods,deployments,statefulsets,pvc,events -o wide || true
+          kubectl -n orion-live logs -l app.kubernetes.io/name=orion-live --all-containers --tail=200 || true
+
+      - name: Delete Kind cluster
+        if: always()
+        run: make kind-delete

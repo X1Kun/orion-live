@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - job.yaml
+images:
+  - name: ghcr.io/x1kun/orion-live
+    newTag: latest

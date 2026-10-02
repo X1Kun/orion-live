@@ -1,0 +1,10 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: orion-local
+  labels:
+    app.kubernetes.io/name: orion-live
+    app.kubernetes.io/part-of: development-infrastructure
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

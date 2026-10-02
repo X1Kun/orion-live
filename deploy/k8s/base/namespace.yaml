@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orion-live
+  labels:
+    app.kubernetes.io/name: orion-live

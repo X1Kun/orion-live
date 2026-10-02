@@ -24,10 +24,12 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Durable Chat persistence with Inbox deduplication, bounded retry, and DLQ handling
 - Authenticated Chat history with stable cursor pagination
 - `room.ready` synchronization and bounded reconnect recovery coverage
+- Kustomize-based two-replica API and migration Job manifests
+- Disposable Kind infrastructure and cross-Pod resilience E2E automation
 - A minimal Docker Compose development environment
-- CI gates for formatting, static analysis, compilation, image construction, Compose validation, and secret scanning
+- CI gates for formatting, static analysis, compilation, image construction, Compose/Kustomize validation, secrets, Kind Smoke on pull requests, and full Kind Resilience on main and schedule
 
-Operational deployment and failure evidence will be added in focused increments. Reaction aggregation or Gift-effect credits may be added later as one optional extension. Their target behavior is documented in [docs/orion-reliability.md](docs/orion-reliability.md).
+Prometheus/Grafana observability and measured load evidence will be added next. Reaction aggregation or Gift-effect credits may be added later as one optional extension. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), with target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
@@ -78,6 +80,18 @@ Run the baseline quality gates without starting dependencies:
 
 ```bash
 make check
+```
+
+Render the API and migration Kubernetes Kustomizations without connecting to a cluster:
+
+```bash
+make k8s-render
+```
+
+On a Linux host with Kind, Docker, kubectl, and sufficient inotify limits, run the complete deployment and resilience workflow:
+
+```bash
+GOPROXY=https://goproxy.cn,direct make kind-e2e
 ```
 
 Run the infrastructure integration tests against dedicated MySQL and RabbitMQ instances:

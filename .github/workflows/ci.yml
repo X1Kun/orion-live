@@ -46,6 +46,16 @@ jobs:
           JWT_SECRET_KEY: ci-only-placeholder-secret-at-least-32-characters
         run: docker compose config --quiet
 
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+
+      - name: Render Kubernetes manifests
+        run: |
+          make k8s-render
+          go test -run '^$' -tags=kubernetes ./tests/kubernetes
+
       - name: Build container image
         run: docker build --tag orion-live:ci .
 
