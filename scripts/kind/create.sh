@@ -37,6 +37,21 @@ if ! kubectl get node "${storage_node}" >/dev/null 2>&1; then
 fi
 kubectl label nodes -l orion.live/storage=true orion.live/storage- >/dev/null 2>&1 || true
 kubectl label node "${storage_node}" orion.live/storage=true --overwrite
+
+observability_node=${ORION_KIND_OBSERVABILITY_NODE:-}
+if [[ -z "${observability_node}" ]]; then
+  if kubectl get node "${cluster_name}-worker2" >/dev/null 2>&1; then
+    observability_node=${cluster_name}-worker2
+  else
+    observability_node=${storage_node}
+  fi
+fi
+if ! kubectl get node "${observability_node}" >/dev/null 2>&1; then
+  echo "observability node ${observability_node} does not exist" >&2
+  exit 1
+fi
+kubectl label nodes -l orion.live/observability=true orion.live/observability- >/dev/null 2>&1 || true
+kubectl label node "${observability_node}" orion.live/observability=true --overwrite
 kubectl apply -f "${project_root}/deploy/k8s/dev/storage-class.yaml"
 
 echo "Available StorageClasses:"

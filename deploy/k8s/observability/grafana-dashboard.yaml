@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orion-live-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: orion-live
+    app.kubernetes.io/component: observability
+data:
+  orion-live.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {"type":"timeseries","title":"HTTP request rate","gridPos":{"h":8,"w":8,"x":0,"y":0},"targets":[{"expr":"sum(rate(orion_http_requests_total[5m]))","legendFormat":"requests/s"}]},
+        {"type":"timeseries","title":"HTTP p95 latency","gridPos":{"h":8,"w":8,"x":8,"y":0},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(orion_http_request_duration_seconds_bucket[5m])))","legendFormat":"p95"}]},
+        {"type":"stat","title":"WebSocket connections","gridPos":{"h":8,"w":8,"x":16,"y":0},"targets":[{"expr":"sum(orion_websocket_connections)"}]},
+        {"type":"timeseries","title":"RabbitMQ Publish Confirm p95","gridPos":{"h":8,"w":8,"x":0,"y":8},"targets":[{"expr":"histogram_quantile(0.95, sum by (le,event_type) (rate(orion_rabbitmq_publish_duration_seconds_bucket[5m])))","legendFormat":"{{event_type}}"}]},
+        {"type":"timeseries","title":"Chat persistence lag p95","gridPos":{"h":8,"w":8,"x":8,"y":8},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(orion_chat_persistence_lag_seconds_bucket[5m])))","legendFormat":"p95"}]},
+        {"type":"timeseries","title":"Chat admission outcomes","gridPos":{"h":8,"w":8,"x":16,"y":8},"targets":[{"expr":"sum by (result) (rate(orion_chat_admission_total[5m]))","legendFormat":"{{result}}"}]},
+        {"type":"timeseries","title":"Persistence outcomes","gridPos":{"h":8,"w":8,"x":0,"y":16},"targets":[{"expr":"sum by (result) (rate(orion_persistence_events_total[5m]))","legendFormat":"{{result}}"}]},
+        {"type":"timeseries","title":"SQL pool connections","gridPos":{"h":8,"w":8,"x":8,"y":16},"targets":[{"expr":"sum by (state) (orion_db_connections)","legendFormat":"{{state}}"}]},
+        {"type":"timeseries","title":"Outbox state","gridPos":{"h":8,"w":8,"x":16,"y":16},"targets":[{"expr":"max by (status) (orion_outbox_events)","legendFormat":"{{status}}"}]},
+        {"type":"timeseries","title":"RabbitMQ queue depth","gridPos":{"h":8,"w":12,"x":0,"y":24},"targets":[{"expr":"rabbitmq_queue_messages{queue=~\"orion.*\"}","legendFormat":"{{queue}}"}]},
+        {"type":"timeseries","title":"Outbox oldest unpublished age","gridPos":{"h":8,"w":12,"x":12,"y":24},"targets":[{"expr":"max(orion_outbox_oldest_unpublished_age_seconds)","legendFormat":"seconds"}]}
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["orion-live"],
+      "templating": {"list": []},
+      "time": {"from":"now-30m","to":"now"},
+      "timezone": "browser",
+      "title": "Orion Live",
+      "uid": "orion-live"
+    }

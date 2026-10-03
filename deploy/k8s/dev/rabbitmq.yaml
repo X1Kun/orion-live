@@ -119,6 +119,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/rabbitmq
+            - name: enabled-plugins
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+              readOnly: true
+      volumes:
+        - name: enabled-plugins
+          configMap:
+            name: rabbitmq-enabled-plugins
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/X1Kun/orion-live/internal/messaging"
+	"github.com/X1Kun/orion-live/internal/metrics"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -60,7 +62,18 @@ func NewPublisher(ctx context.Context, client *Client) (*Publisher, error) {
 	return publisher, nil
 }
 
-func (p *Publisher) Publish(ctx context.Context, event messaging.Event) error {
+func (p *Publisher) Publish(ctx context.Context, event messaging.Event) (publishErr error) {
+	started := time.Now()
+	eventType := string(event.EventType)
+	if !event.EventType.IsSupported() {
+		eventType = "unknown"
+	}
+	defer func() {
+		result := publishResult(publishErr)
+		metrics.RabbitMQPublishTotal.WithLabelValues(eventType, result).Inc()
+		metrics.RabbitMQPublishDuration.WithLabelValues(eventType, result).Observe(time.Since(started).Seconds())
+	}()
+
 	body, err := event.Marshal()
 	if err != nil {
 		return err
@@ -107,6 +120,29 @@ func (p *Publisher) Publish(ctx context.Context, event messaging.Event) error {
 		return fmt.Errorf("%w: publisher confirm mode is not enabled", ErrPublishInterrupted)
 	}
 	return p.awaitPublishResult(ctx, confirmation)
+}
+
+func publishResult(err error) string {
+	switch {
+	case err == nil:
+		return "confirmed"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, ErrPublisherClosed):
+		return "closed"
+	case errors.Is(err, ErrPublishUnroutable):
+		return "unroutable"
+	case errors.Is(err, ErrPublishNacked):
+		return "nacked"
+	case errors.Is(err, ErrPublishInterrupted):
+		return "interrupted"
+	case errors.Is(err, messaging.ErrInvalidEvent):
+		return "invalid"
+	default:
+		return "error"
+	}
 }
 
 func (p *Publisher) awaitPublishResult(ctx context.Context, confirmation *amqp.DeferredConfirmation) error {

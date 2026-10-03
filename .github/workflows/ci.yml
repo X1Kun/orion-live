@@ -51,10 +51,18 @@ jobs:
         with:
           version: v1.31.0
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.20.0
+
       - name: Render Kubernetes manifests
         run: |
           make k8s-render
           go test -run '^$' -tags=kubernetes ./tests/kubernetes
+
+      - name: Render observability Helm chart
+        run: make observability-render
 
       - name: Build container image
         run: docker build --tag orion-live:ci .

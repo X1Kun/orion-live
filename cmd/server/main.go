@@ -15,6 +15,7 @@ import (
 	"github.com/X1Kun/orion-live/internal/handler"
 	"github.com/X1Kun/orion-live/internal/health"
 	"github.com/X1Kun/orion-live/internal/messaging"
+	"github.com/X1Kun/orion-live/internal/metrics"
 	"github.com/X1Kun/orion-live/internal/outbox"
 	"github.com/X1Kun/orion-live/internal/persistence"
 	rabbitclient "github.com/X1Kun/orion-live/internal/rabbitmq"
@@ -51,6 +52,7 @@ func main() {
 		logger.Log.WithError(err).Fatal("access mysql connection pool")
 	}
 	defer sqlDB.Close()
+	metrics.RegisterInfrastructureCollectors(sqlDB, db)
 
 	redis, err := redisclient.Open(startupCtx, cfg.Redis)
 	if err != nil {

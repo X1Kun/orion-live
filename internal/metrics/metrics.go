@@ -75,4 +75,47 @@ var (
 		Name: "orion_chat_conflicts_total",
 		Help: "Total number of conflicting Chat messages rejected by the business key.",
 	})
+
+	RabbitMQPublishTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "orion_rabbitmq_publish_total", Help: "Total number of RabbitMQ publish outcomes."},
+		[]string{"event_type", "result"},
+	)
+
+	RabbitMQPublishDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "orion_rabbitmq_publish_duration_seconds",
+			Help:    "RabbitMQ publication duration including Publisher Confirm wait.",
+			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"event_type", "result"},
+	)
+
+	ChatAdmissionDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "orion_chat_admission_duration_seconds",
+			Help:    "Redis Chat admission decision duration.",
+			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
+		},
+		[]string{"result"},
+	)
+
+	PersistenceProcessingDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "orion_persistence_processing_duration_seconds",
+			Help:    "Persistence Consumer delivery processing duration.",
+			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		},
+		[]string{"result"},
+	)
+
+	ChatPersistenceLag = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "orion_chat_persistence_lag_seconds",
+		Help:    "Time from Chat acceptance to its first successful MySQL persistence.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+	})
+
+	WebSocketSlowClientRemovals = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "orion_websocket_slow_client_removals_total",
+		Help: "Total number of WebSocket Clients removed because their outbound queue could not accept a broadcast.",
+	})
 )

@@ -1,4 +1,4 @@
-.PHONY: build check test-integration compose-config k8s-render kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete migrate up down logs
+.PHONY: build check test-integration compose-config k8s-render observability-render kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete observability-install observability-verify observability-delete migrate up down logs
 
 build:
 	go build ./cmd/server ./cmd/migrate
@@ -23,6 +23,12 @@ k8s-render:
 	kubectl kustomize deploy/k8s/migration >/dev/null
 	kubectl kustomize deploy/k8s/dev >/dev/null
 	kubectl kustomize deploy/k8s/overlays/kind >/dev/null
+	kubectl kustomize deploy/k8s/observability >/dev/null
+
+observability-render:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	helm repo update prometheus-community
+	helm template orion-monitoring prometheus-community/kube-prometheus-stack --version 91.8.2 --namespace monitoring -f deploy/k8s/observability/helm-values.yaml -f deploy/k8s/observability/helm-values-kind.yaml >/dev/null
 
 kind-create:
 	./scripts/kind/create.sh
@@ -43,6 +49,15 @@ kind-e2e: kind-create kind-deploy kind-test
 
 kind-delete:
 	./scripts/kind/delete.sh
+
+observability-install:
+	./scripts/observability/install.sh
+
+observability-verify:
+	./scripts/observability/verify.sh
+
+observability-delete:
+	./scripts/observability/delete.sh
 
 migrate:
 	docker compose run --rm migrate

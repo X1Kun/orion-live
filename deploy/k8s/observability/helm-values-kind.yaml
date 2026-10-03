@@ -1,0 +1,6 @@
+grafana:
+  nodeSelector:
+    orion.live/observability: "true"
+
+kubeStateMetrics:
+  enabled: false

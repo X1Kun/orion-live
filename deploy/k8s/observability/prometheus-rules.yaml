@@ -1,0 +1,75 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: orion-live
+  namespace: orion-live
+  labels:
+    app.kubernetes.io/name: orion-live
+    app.kubernetes.io/component: observability
+spec:
+  groups:
+    - name: orion.application
+      rules:
+        - alert: OrionAPITargetDown
+          expr: up{namespace="orion-live",service="orion-api"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Orion API metrics target is down
+        - alert: OrionPersistenceConsumerNotReady
+          expr: min(orion_persistence_consumer_ready) < 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: An Orion Persistence Consumer is not ready
+        - alert: OrionRealtimeSubscriberNotReady
+          expr: min(orion_realtime_subscriber_ready) < 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: An Orion Realtime Subscriber is not ready
+        - alert: OrionRabbitMQPublishFailures
+          expr: sum(rate(orion_rabbitmq_publish_total{result!="confirmed"}[5m])) / clamp_min(sum(rate(orion_rabbitmq_publish_total[5m])), 1) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than five percent of Orion RabbitMQ publications are failing
+        - alert: OrionChatAdmissionUnavailable
+          expr: sum(rate(orion_chat_admission_total{result="unavailable"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Redis Chat admission is unavailable
+        - alert: OrionOutboxCollectionFailed
+          expr: orion_outbox_collection_success == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Orion cannot collect Outbox state
+        - alert: OrionOutboxFailedEvents
+          expr: orion_outbox_events{status="FAILED"} > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: Orion has terminally failed Outbox events
+        - alert: OrionOutboxPublicationStalled
+          expr: orion_outbox_oldest_unpublished_age_seconds > 60
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Orion Outbox publication is delayed
+        - alert: OrionPersistenceDLQNotEmpty
+          expr: rabbitmq_queue_messages{queue="orion.interaction.persistence.dlq"} > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: Orion Persistence DLQ contains messages

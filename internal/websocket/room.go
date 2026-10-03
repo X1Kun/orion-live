@@ -3,6 +3,8 @@ package websocket
 import (
 	"errors"
 	"sync"
+
+	"github.com/X1Kun/orion-live/internal/metrics"
 )
 
 var ErrRoomQueueFull = errors.New("room broadcast queue is full")
@@ -98,6 +100,7 @@ func (r *room) deliver(message []byte) bool {
 		}
 		delete(r.clients, client)
 		client.close()
+		metrics.WebSocketSlowClientRemovals.Inc()
 	}
 	return len(r.clients) == 0
 }

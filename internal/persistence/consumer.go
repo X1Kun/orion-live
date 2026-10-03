@@ -123,22 +123,31 @@ func (c *Consumer) consumeSession(session *consumerSession) error {
 }
 
 func (c *Consumer) handleDelivery(delivery amqp.Delivery) error {
+	started := time.Now()
+	metricResult := "error"
+	defer func() {
+		metrics.PersistenceProcessingDuration.WithLabelValues(metricResult).Observe(time.Since(started).Seconds())
+	}()
 	event, payload, err := decodeChatEvent(delivery.Body)
 	if err != nil {
+		metricResult = "malformed"
 		return deadLetter(delivery, "malformed")
 	}
 	processCtx, cancel := context.WithTimeout(c.ctx, c.config.ProcessingTimeout)
 	result, err := c.repository.Persist(processCtx, consumerName, event, payload)
 	cancel()
 	if err != nil {
+		metricResult = "retry"
 		logger.Log.WithError(err).WithField("event_id", event.EventID).Warn("retry Chat persistence")
 		if err := delivery.Reject(true); err != nil {
+			metricResult = "retry_reject_error"
 			return fmt.Errorf("reject Chat event for retry: %w", err)
 		}
 		metrics.PersistenceEventsTotal.WithLabelValues("retry").Inc()
 		return nil
 	}
 	if result == repository.ChatConflictingMessage {
+		metricResult = string(result)
 		metrics.ChatConflictsTotal.Inc()
 		logger.Log.WithFields(map[string]any{
 			"event_id": event.EventID, "live_session_id": event.LiveSessionID,
@@ -147,9 +156,18 @@ func (c *Consumer) handleDelivery(delivery amqp.Delivery) error {
 		return deadLetter(delivery, string(result))
 	}
 	if err := delivery.Ack(false); err != nil {
+		metricResult = "ack_error"
 		return fmt.Errorf("ack persisted Chat event: %w", err)
 	}
+	metricResult = string(result)
 	metrics.PersistenceEventsTotal.WithLabelValues(string(result)).Inc()
+	if result == repository.ChatPersisted {
+		lag := time.Since(payload.AcceptedAt.UTC()).Seconds()
+		if lag < 0 {
+			lag = 0
+		}
+		metrics.ChatPersistenceLag.Observe(lag)
+	}
 	return nil
 }
 
