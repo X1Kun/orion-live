@@ -57,18 +57,22 @@ func (s *chatService) Accept(ctx context.Context, liveSessionID, userID uint64, 
 	if !utf8.ValidString(content) || strings.TrimSpace(content) == "" || utf8.RuneCountInString(content) > maxChatContentRunes {
 		return ChatAcceptance{}, ErrInvalidChatContent
 	}
+	admissionStarted := time.Now()
 	admissionCtx, cancelAdmission := context.WithTimeout(ctx, s.config.AdmissionTimeout)
 	allowed, err := s.admission.Allow(admissionCtx, liveSessionID, userID)
 	cancelAdmission()
 	if err != nil {
 		metrics.ChatAdmissionTotal.WithLabelValues("unavailable").Inc()
+		metrics.ChatAdmissionDuration.WithLabelValues("unavailable").Observe(time.Since(admissionStarted).Seconds())
 		return ChatAcceptance{}, fmt.Errorf("%w: %v", ErrChatAdmissionUnavailable, err)
 	}
 	if !allowed {
 		metrics.ChatAdmissionTotal.WithLabelValues("rate_limited").Inc()
+		metrics.ChatAdmissionDuration.WithLabelValues("rate_limited").Observe(time.Since(admissionStarted).Seconds())
 		return ChatAcceptance{}, ErrChatRateLimited
 	}
 	metrics.ChatAdmissionTotal.WithLabelValues("allowed").Inc()
+	metrics.ChatAdmissionDuration.WithLabelValues("allowed").Observe(time.Since(admissionStarted).Seconds())
 
 	acceptedAt := time.Now().UTC()
 	event, err := messaging.NewChatMessageAcceptedEvent(liveSessionID, userID, messageID, content, acceptedAt)

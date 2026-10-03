@@ -4,4 +4,5 @@ resources:
   - storage-class.yaml
   - mysql.yaml
   - redis.yaml
+  - rabbitmq-plugins.yaml
   - rabbitmq.yaml

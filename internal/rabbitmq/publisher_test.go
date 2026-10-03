@@ -29,6 +29,28 @@ func TestPublishClassifiesClosedClientAsInterrupted(t *testing.T) {
 	}
 }
 
+func TestPublishResultLabelsAreBounded(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{err: nil, want: "confirmed"},
+		{err: context.DeadlineExceeded, want: "timeout"},
+		{err: context.Canceled, want: "canceled"},
+		{err: ErrPublisherClosed, want: "closed"},
+		{err: ErrPublishUnroutable, want: "unroutable"},
+		{err: ErrPublishNacked, want: "nacked"},
+		{err: ErrPublishInterrupted, want: "interrupted"},
+		{err: messaging.ErrInvalidEvent, want: "invalid"},
+		{err: errors.New("unexpected"), want: "error"},
+	}
+	for _, tt := range tests {
+		if got := publishResult(tt.err); got != tt.want {
+			t.Errorf("publishResult(%v) = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+}
+
 func publisherTestEvent() messaging.Event {
 	return messaging.Event{
 		EventID:       "publisher-test-event",

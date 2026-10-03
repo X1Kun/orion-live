@@ -324,6 +324,11 @@ Prometheus records operational behavior, including:
 - Consumer retry, DLQ, processing, and persistence latency
 - Redis admission failures and recovery
 - Chat conflict counts
+- RabbitMQ publication outcomes and Publisher Confirm latency
+- Chat admission decision latency
+- Persistence processing duration and acceptance-to-commit lag
+- SQL connection pool use and wait time
+- WebSocket slow-client removals
 
 High-cardinality identifiers such as `user_id`, `message_id`, and `event_id` never appear as metric labels. Structured logs carry correlation and event identifiers for diagnosis.
 
@@ -394,7 +399,7 @@ Repeatable commands, results, measurements, and known limitations are recorded i
 4. **Messaging foundation — implemented baseline:** the event envelope, maintained AMQP client, durable core topology, Confirmed Publisher, mandatory routing, retry/DLQ declarations, per-API realtime subscriber, readiness, and explicit connection/channel recovery are implemented. Periodic management-level binding audits remain part of operational verification.
 5. **Session-ended Outbox — implemented:** Outbox migration, fenced claim and lease, bounded Relay retry, atomic End transaction, `live_session.ended` publication, realtime notification, and process-local send-gate propagation.
 6. **Persistent Chat — implemented baseline:** `chat.send`, UUIDv4 message identity, Redis admission, Confirmed Publish, `chat.ack`, cross-instance broadcast, Inbox idempotency, durable persistence, bounded retry, DLQ classification, cursor-based history, `room.ready`, and bounded reconnect recovery are implemented. Recovery remains finite and does not claim watermark-backed completeness.
-7. **Operational deployment — implemented baseline:** the two-replica API Deployment, independent Migration Job, Service, probes, resource bounds, Pod security context, disruption budget, rolling-update policy, single-replica development dependencies, and Kind E2E/resilience harness are implemented and verified from a clean three-node cluster. The API replicas run on different workers while dynamically provisioned local-path volumes and dependency Pods remain pinned to one labeled storage worker. Selective node image loading avoids unrelated copies. Independent Smoke and Resilience suites run on pull requests versus main/scheduled CI. The evidence covers fixed-Pod cross-node Chat, MySQL/Inbox uniqueness, Pod replacement, cursor recovery, Redis fail-closed behavior, RabbitMQ recovery, MySQL readiness endpoint removal, final History/Inbox recovery, and PDB enforcement through the Eviction API. Prometheus/Grafana integration and measured load evidence remain.
+7. **Operational deployment — implemented baseline:** the two-replica API Deployment, independent Migration Job, Service, probes, resource bounds, Pod security context, disruption budget, rolling-update policy, single-replica development dependencies, and Kind E2E/resilience harness are implemented and verified from a clean three-node cluster. The API replicas run on different workers while dynamically provisioned local-path volumes and dependency Pods remain pinned to one labeled storage worker. Selective node image loading avoids unrelated copies. Independent Smoke and Resilience suites run on pull requests versus main/scheduled CI. The evidence covers fixed-Pod cross-node Chat, MySQL/Inbox uniqueness, Pod replacement, cursor recovery, Redis fail-closed behavior, RabbitMQ recovery, MySQL readiness endpoint removal, final History/Inbox recovery, and PDB enforcement through the Eviction API. Prometheus Operator, Prometheus, Grafana, Alertmanager, node-exporter, Orion/RabbitMQ ServiceMonitors, alert rules, and the Orion dashboard are verified. Measured load evidence remains.
 8. **Optional extension:** implement at most one of Reaction aggregation or Gift-effect credit transactions after the core release evidence is complete.
 
 Each roadmap item includes implementation, focused tests, operational metrics, failure behavior, and documentation. A new business feature does not create a second messaging framework.

@@ -26,10 +26,11 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - `room.ready` synchronization and bounded reconnect recovery coverage
 - Kustomize-based two-replica API and migration Job manifests
 - Disposable Kind infrastructure and cross-Pod resilience E2E automation
+- Prometheus/Grafana stack with Orion and RabbitMQ targets, alerts, and dashboard
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose/Kustomize validation, secrets, Kind Smoke on pull requests, and full Kind Resilience on main and schedule
 
-Prometheus/Grafana observability and measured load evidence will be added next. Reaction aggregation or Gift-effect credits may be added later as one optional extension. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), with target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
+Measured load evidence and evidence-driven optimization will be added next. Reaction aggregation or Gift-effect credits may be added later as one optional extension. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), the optional monitoring stack in [deploy/k8s/observability/README.md](deploy/k8s/observability/README.md), and target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 ## Local development
 
