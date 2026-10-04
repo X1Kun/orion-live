@@ -9,14 +9,16 @@ import (
 
 	"github.com/X1Kun/orion-live/internal/messaging"
 	"github.com/X1Kun/orion-live/internal/metrics"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const maxPublisherConcurrency = 64
+
 var (
-	ErrPublisherClosed    = errors.New("rabbitmq publisher is closed")
-	ErrPublishInterrupted = errors.New("rabbitmq publication was interrupted")
-	ErrPublishNacked      = errors.New("rabbitmq publication was negatively acknowledged")
-	ErrPublishUnroutable  = errors.New("rabbitmq publication was returned as unroutable")
+	ErrPublisherClosed             = errors.New("rabbitmq publisher is closed")
+	ErrInvalidPublisherConcurrency = errors.New("rabbitmq publisher concurrency must be between 1 and 64")
+	ErrPublishInterrupted          = errors.New("rabbitmq publication was interrupted")
+	ErrPublishNacked               = errors.New("rabbitmq publication was negatively acknowledged")
+	ErrPublishUnroutable           = errors.New("rabbitmq publication was returned as unroutable")
 )
 
 type UnroutableError struct {
@@ -41,23 +43,42 @@ func (e *UnroutableError) Unwrap() error {
 	return ErrPublishUnroutable
 }
 
+// Publisher uses a bounded set of independent AMQP Channels. Each lane allows
+// one in-flight publication so confirms and mandatory returns remain isolated,
+// while separate lanes can publish concurrently.
 type Publisher struct {
-	client *Client
-
-	mu              sync.Mutex
-	channel         *amqp.Channel
-	returnsCh       <-chan amqp.Return
-	channelClosedCh <-chan *amqp.Error
-	closed          bool
+	mu        sync.Mutex
+	lanes     []publishLane
+	available chan publishLane
+	active    sync.WaitGroup
+	closed    bool
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func NewPublisher(ctx context.Context, client *Client) (*Publisher, error) {
-	publisher := &Publisher{client: client}
-	publisher.mu.Lock()
-	err := publisher.ensureChannelLocked(ctx)
-	publisher.mu.Unlock()
-	if err != nil {
-		return nil, err
+type publishLane interface {
+	publish(context.Context, messaging.Event, []byte) error
+	close() error
+}
+
+func NewPublisher(ctx context.Context, client *Client, concurrency int) (*Publisher, error) {
+	if concurrency <= 0 || concurrency > maxPublisherConcurrency {
+		return nil, ErrInvalidPublisherConcurrency
+	}
+	publisher := &Publisher{
+		lanes:     make([]publishLane, 0, concurrency),
+		available: make(chan publishLane, concurrency),
+	}
+	for range concurrency {
+		lane := &publisherLane{client: client}
+		if err := lane.ensureChannel(ctx); err != nil {
+			for _, initialized := range publisher.lanes {
+				_ = initialized.close()
+			}
+			return nil, err
+		}
+		publisher.lanes = append(publisher.lanes, lane)
+		publisher.available <- lane
 	}
 	return publisher, nil
 }
@@ -78,48 +99,52 @@ func (p *Publisher) Publish(ctx context.Context, event messaging.Event) (publish
 	if err != nil {
 		return err
 	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return ErrPublisherClosed
-	}
-	if err := p.ensureChannelLocked(ctx); err != nil {
+	lane, err := p.acquire(ctx)
+	if err != nil {
 		return err
 	}
+	defer p.release(lane)
+	return lane.publish(ctx, event, body)
+}
 
-	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
-		ctx,
-		InteractionExchangeName,
-		event.RoutingKey(),
-		true,
-		false,
-		amqp.Publishing{
-			Headers: amqp.Table{
-				"schema_version": int32(event.SchemaVersion),
-			},
-			ContentType:   "application/json",
-			DeliveryMode:  amqp.Persistent,
-			CorrelationId: event.CorrelationID,
-			MessageId:     event.EventID,
-			Timestamp:     event.OccurredAt,
-			Type:          string(event.EventType),
-			AppId:         "orion-live",
-			Body:          body,
-		},
-	)
-	if err != nil {
-		p.invalidateChannelLocked()
-		if ctx.Err() != nil {
-			return ctx.Err()
+func (p *Publisher) acquire(ctx context.Context) (publishLane, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, ErrPublisherClosed
+	}
+	available := p.available
+	p.active.Add(1)
+	p.mu.Unlock()
+
+	select {
+	case lane := <-available:
+		return lane, nil
+	case <-ctx.Done():
+		p.active.Done()
+		return nil, ctx.Err()
+	}
+}
+
+func (p *Publisher) release(lane publishLane) {
+	p.available <- lane
+	p.active.Done()
+}
+
+func (p *Publisher) Close() error {
+	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.closed = true
+		p.mu.Unlock()
+		p.active.Wait()
+		for _, lane := range p.lanes {
+			p.closeErr = errors.Join(p.closeErr, lane.close())
 		}
-		return fmt.Errorf("%w: %v", ErrPublishInterrupted, err)
-	}
-	if confirmation == nil {
-		p.invalidateChannelLocked()
-		return fmt.Errorf("%w: publisher confirm mode is not enabled", ErrPublishInterrupted)
-	}
-	return p.awaitPublishResult(ctx, confirmation)
+	})
+	return p.closeErr
 }
 
 func publishResult(err error) string {
@@ -142,104 +167,5 @@ func publishResult(err error) string {
 		return "invalid"
 	default:
 		return "error"
-	}
-}
-
-func (p *Publisher) awaitPublishResult(ctx context.Context, confirmation *amqp.DeferredConfirmation) error {
-	select {
-	case <-ctx.Done():
-		p.invalidateChannelLocked()
-		return ctx.Err()
-	case amqpErr, ok := <-p.channelClosedCh:
-		p.invalidateChannelLocked()
-		if ok && amqpErr != nil {
-			return fmt.Errorf("%w: %v", ErrPublishInterrupted, amqpErr)
-		}
-		return ErrPublishInterrupted
-	case returned, ok := <-p.returnsCh:
-		if !ok {
-			p.invalidateChannelLocked()
-			return ErrPublishInterrupted
-		}
-		return newUnroutableError(returned)
-	case <-confirmation.Done():
-		if !confirmation.Acked() {
-			if p.channel == nil || p.channel.IsClosed() {
-				p.invalidateChannelLocked()
-				return fmt.Errorf("%w: %v", ErrPublishInterrupted, ErrPublishNacked)
-			}
-			return ErrPublishNacked
-		}
-		return p.pendingReturnOrNil()
-	}
-}
-
-func (p *Publisher) pendingReturnOrNil() error {
-	select {
-	case returned, ok := <-p.returnsCh:
-		if !ok {
-			p.invalidateChannelLocked()
-			return ErrPublishInterrupted
-		}
-		return newUnroutableError(returned)
-	default:
-		return nil
-	}
-}
-
-func (p *Publisher) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil
-	}
-	p.closed = true
-	if p.channel == nil || p.channel.IsClosed() {
-		return nil
-	}
-	err := p.channel.Close()
-	p.channel = nil
-	return err
-}
-
-func (p *Publisher) ensureChannelLocked(ctx context.Context) error {
-	if p.closed {
-		return ErrPublisherClosed
-	}
-	if p.channel != nil && !p.channel.IsClosed() {
-		return nil
-	}
-	channel, err := p.client.Channel(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("%w: %v", ErrPublishInterrupted, err)
-	}
-	if err := channel.Confirm(false); err != nil {
-		_ = channel.Close()
-		return fmt.Errorf("%w: enable publisher confirms: %v", ErrPublishInterrupted, err)
-	}
-	p.channel = channel
-	p.returnsCh = channel.NotifyReturn(make(chan amqp.Return, 1))
-	p.channelClosedCh = channel.NotifyClose(make(chan *amqp.Error, 1))
-	return nil
-}
-
-func (p *Publisher) invalidateChannelLocked() {
-	if p.channel != nil && !p.channel.IsClosed() {
-		_ = p.channel.Close()
-	}
-	p.channel = nil
-	p.returnsCh = nil
-	p.channelClosedCh = nil
-}
-
-func newUnroutableError(returned amqp.Return) error {
-	return &UnroutableError{
-		Exchange:   returned.Exchange,
-		RoutingKey: returned.RoutingKey,
-		ReplyCode:  returned.ReplyCode,
-		ReplyText:  returned.ReplyText,
 	}
 }

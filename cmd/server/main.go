@@ -68,12 +68,12 @@ func main() {
 	if err := rabbitclient.InitializeCoreTopology(startupCtx, rabbitMQ, cfg.Persistence); err != nil {
 		logger.Log.WithError(err).Fatal("initialize rabbitmq topology")
 	}
-	outboxPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
+	outboxPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ, 1)
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize Outbox publisher")
 	}
 	defer outboxPublisher.Close()
-	chatPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ)
+	chatPublisher, err := rabbitclient.NewPublisher(startupCtx, rabbitMQ, cfg.RabbitMQ.ChatPublishConcurrency)
 	if err != nil {
 		logger.Log.WithError(err).Fatal("initialize Chat publisher")
 	}

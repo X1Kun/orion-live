@@ -114,7 +114,7 @@ func TestChatPersistenceIdempotencyAndConsumer(t *testing.T) {
 		defer stop()
 		_ = consumer.Shutdown(shutdown)
 	}()
-	publisher, err := rabbitclient.NewPublisher(ctx, rabbitMQ)
+	publisher, err := rabbitclient.NewPublisher(ctx, rabbitMQ, 1)
 	if err != nil {
 		t.Fatalf("create Publisher: %v", err)
 	}
