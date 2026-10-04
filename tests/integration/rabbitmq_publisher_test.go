@@ -44,7 +44,7 @@ func TestRabbitMQTopologyPublisherAndReconnect(t *testing.T) {
 	}
 	purgePersistenceQueue(t, ctx, client)
 
-	publisher, err := rabbitclient.NewPublisher(ctx, client)
+	publisher, err := rabbitclient.NewPublisher(ctx, client, 4)
 	if err != nil {
 		t.Fatalf("create publisher: %v", err)
 	}
@@ -85,11 +85,13 @@ func TestRabbitMQTopologyPublisherAndReconnect(t *testing.T) {
 		t.Fatal("RabbitMQ client did not replace the closed connection")
 	}
 
-	second := integrationChatEvent("event-after-reconnect")
-	if err := publisher.Publish(reconnectCtx, second); err != nil {
-		t.Fatalf("publish after reconnect: %v", err)
+	for index := range 4 {
+		afterReconnect := integrationChatEvent(fmt.Sprintf("event-after-reconnect-%d", index))
+		if err := publisher.Publish(reconnectCtx, afterReconnect); err != nil {
+			t.Fatalf("publish %d after reconnect: %v", index, err)
+		}
+		assertQueuedEvent(t, reconnectCtx, client, afterReconnect.EventID)
 	}
-	assertQueuedEvent(t, reconnectCtx, client, second.EventID)
 }
 
 func TestPersistenceQuorumDelayedRetryAndDeadLetter(t *testing.T) {
@@ -138,7 +140,7 @@ func TestPersistenceQuorumDelayedRetryAndDeadLetter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume persistence DLQ: %v", err)
 	}
-	publisher, err := rabbitclient.NewPublisher(ctx, client)
+	publisher, err := rabbitclient.NewPublisher(ctx, client, 1)
 	if err != nil {
 		t.Fatalf("create Publisher: %v", err)
 	}
@@ -240,7 +242,7 @@ func TestRealtimeSubscriberBroadcastAndReconnect(t *testing.T) {
 			t.Errorf("Subscriber.Shutdown() error = %v", err)
 		}
 	}()
-	publisher, err := rabbitclient.NewPublisher(ctx, client)
+	publisher, err := rabbitclient.NewPublisher(ctx, client, 1)
 	if err != nil {
 		t.Fatalf("create Publisher: %v", err)
 	}

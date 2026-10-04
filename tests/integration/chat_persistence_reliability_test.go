@@ -229,7 +229,7 @@ func newChatPersistenceFixture(t *testing.T) *chatPersistenceFixture {
 	_, _ = channel.QueuePurge(rabbitclient.PersistenceQueueName, false)
 	_, _ = channel.QueuePurge(rabbitclient.PersistenceDeadLetterQueueName, false)
 	_ = channel.Close()
-	publisher, err := rabbitclient.NewPublisher(ctx, rabbitMQ)
+	publisher, err := rabbitclient.NewPublisher(ctx, rabbitMQ, 1)
 	if err != nil {
 		cancel()
 		_ = rabbitMQ.Close()

@@ -199,7 +199,7 @@ one RabbitMQ broker node
 - The Persistence Queue binds `chat.message.accepted`; `live_session.ended` remains authoritative in the LiveSession table and Outbox.
 - Persistence Consumer replicas compete on the shared durable queue.
 - Durable processing messages use persistent delivery mode.
-- Publishers wait for Confirm and enable mandatory routing.
+- Publishers wait for Confirm and enable mandatory routing. The Chat Publisher uses a bounded pool of independent AMQP Channels so publications can wait for confirms concurrently without mixing confirmation or return state; the sequential Outbox Relay keeps one publisher lane.
 - The API send gate opens only after required topology validation succeeds.
 - Connections, channels, QoS, publishers, and Consumers are recreated with exponential backoff and jitter.
 - Orion uses one recovery owner: the application Client recreates connections, while Publisher and Consumer components recreate their channels. The experimental `amqp091-go` automatic Recovery mechanism remains disabled to avoid overlapping recovery state machines.
@@ -265,6 +265,7 @@ WebSocket chat.send with client-generated message_id
 ```
 
 - `(live_session_id, user_id, message_id)` uniquely identifies a Chat message.
+- `RABBITMQ_CHAT_PUBLISH_CONCURRENCY` bounds the number of Chat publications awaiting confirms per API instance. Waiting for a free lane remains inside the request's publish timeout and is included in publish-duration metrics.
 - A deliberate retry reuses `message_id`; a new send creates a new UUIDv4.
 - The API never accepts `user_id` from the frame payload.
 - Publication retries reuse the original `event_id` and `accepted_at`.
