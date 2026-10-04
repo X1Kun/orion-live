@@ -27,10 +27,13 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Kustomize-based two-replica API and migration Job manifests
 - Disposable Kind infrastructure and cross-Pod resilience E2E automation
 - Prometheus/Grafana stack with Orion and RabbitMQ targets, alerts, and dashboard
+- Correctness-aware Chat load harness with a reproducible smoke profile
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose/Kustomize validation, secrets, Kind Smoke on pull requests, and full Kind Resilience on main and schedule
 
 Measured load evidence and evidence-driven optimization will be added next. Reaction aggregation or Gift-effect credits may be added later as one optional extension. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), the optional monitoring stack in [deploy/k8s/observability/README.md](deploy/k8s/observability/README.md), and target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
+
+The load harness and its correctness guarantees are documented in [docs/load-testing.md](docs/load-testing.md). The smoke profile validates the harness; measured capacity evidence is intentionally recorded separately.
 
 ## Local development
 
