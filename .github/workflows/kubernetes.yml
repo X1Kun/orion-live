@@ -51,6 +51,9 @@ jobs:
       - name: Run Kubernetes Smoke
         run: make kind-smoke
 
+      - name: Run Chat load harness smoke
+        run: make kind-load-smoke
+
       - name: Collect diagnostics
         if: failure()
         run: |

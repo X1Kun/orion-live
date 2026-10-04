@@ -1,4 +1,4 @@
-.PHONY: build check test-integration compose-config k8s-render observability-render kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete observability-install observability-verify observability-delete migrate up down logs
+.PHONY: build check test-integration compose-config k8s-render observability-render load-smoke kind-load-smoke kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete observability-install observability-verify observability-delete migrate up down logs
 
 build:
 	go build ./cmd/server ./cmd/migrate
@@ -29,6 +29,12 @@ observability-render:
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
 	helm repo update prometheus-community
 	helm template orion-monitoring prometheus-community/kube-prometheus-stack --version 91.8.2 --namespace monitoring -f deploy/k8s/observability/helm-values.yaml -f deploy/k8s/observability/helm-values-kind.yaml >/dev/null
+
+load-smoke:
+	go run ./cmd/chatload $(LOAD_ARGS)
+
+kind-load-smoke:
+	./scripts/load/kind-smoke.sh $(LOAD_ARGS)
 
 kind-create:
 	./scripts/kind/create.sh
