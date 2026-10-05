@@ -35,6 +35,8 @@ Measured load evidence and evidence-driven optimization will be added next. Reac
 
 The load harness and its correctness guarantees are documented in [docs/load-testing.md](docs/load-testing.md). The smoke profile validates the harness; measured capacity evidence is intentionally recorded separately.
 
+The repeatable post-optimization profiles and curated results are documented in [docs/performance/chat-baseline.md](docs/performance/chat-baseline.md).
+
 ## Local development
 
 Requirements:

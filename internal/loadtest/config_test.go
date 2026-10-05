@@ -20,6 +20,7 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
+		{name: "mode", mutate: func(c *Config) { c.Mode = "unknown" }},
 		{name: "relative URL", mutate: func(c *Config) { c.BaseURL = "/api" }},
 		{name: "connections", mutate: func(c *Config) { c.Connections = 0 }},
 		{name: "connections per user", mutate: func(c *Config) { c.ConnectionsPerUser = c.Connections + 1 }},
@@ -39,5 +40,28 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 				t.Fatal("invalid configuration was accepted")
 			}
 		})
+	}
+}
+
+func TestConnectionsModeAllowsNoMessages(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = ModeConnections
+	cfg.MessageRate = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("connections config rejected: %v", err)
+	}
+	if cfg.TargetMessages() != 0 {
+		t.Fatalf("TargetMessages() = %d, want 0", cfg.TargetMessages())
+	}
+}
+
+func TestConnectionURLs(t *testing.T) {
+	cfg := DefaultConfig()
+	if got := cfg.ConnectionURLs(); len(got) != 1 || got[0] != cfg.BaseURL {
+		t.Fatalf("default ConnectionURLs() = %v", got)
+	}
+	cfg.ConnectionBaseURLs = []string{"http://api-a", "http://api-b"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("multi-endpoint config rejected: %v", err)
 	}
 }

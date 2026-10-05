@@ -41,7 +41,7 @@ kubectl -n monitoring get secret orion-monitoring-grafana \
 echo
 ```
 
-The dashboard covers HTTP traffic and latency, active WebSockets, RabbitMQ Publish Confirm latency, Chat admission, persistence outcomes and lag, SQL pool use, Outbox state, and RabbitMQ queue depth. Prometheus rules cover target readiness, publication failures, unavailable admission, failed or stalled Outbox events, and Persistence DLQ depth.
+The dashboard covers HTTP traffic and latency, active WebSockets, RabbitMQ Publish Confirm latency, Chat admission, persistence outcomes and lag, SQL pool use, Outbox state, and RabbitMQ queue depth. The RabbitMQ ServiceMonitor keeps the default aggregated endpoint and adds a filtered `/metrics/detailed` scrape for only Orion queue coarse metrics; it does not enable the expensive all-object endpoint. Prometheus rules cover target readiness, publication failures, unavailable admission, failed or stalled Outbox events, and Persistence DLQ depth.
 
 Delete the optional stack with:
 

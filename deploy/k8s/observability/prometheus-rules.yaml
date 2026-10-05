@@ -67,7 +67,7 @@ spec:
           annotations:
             summary: Orion Outbox publication is delayed
         - alert: OrionPersistenceDLQNotEmpty
-          expr: rabbitmq_queue_messages{queue="orion.interaction.persistence.dlq"} > 0
+          expr: rabbitmq_detailed_queue_messages{queue="orion.interaction.persistence.dlq"} > 0
           for: 1m
           labels:
             severity: warning

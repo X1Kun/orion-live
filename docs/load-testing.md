@@ -32,16 +32,62 @@ make kind-load-smoke LOAD_ARGS='-connections 50 -message-rate 20 -duration 30s'
 
 `-connections-per-user` reduces account setup cost for connection-capacity experiments, but it must not exceed the deployment's `WEBSOCKET_MAX_CONNECTIONS_PER_USER` setting. Keep it at one when measuring per-user Chat admission limits.
 
+Use connection-only mode to hold authenticated WebSockets without generating Chat traffic:
+
+```bash
+make kind-load-smoke LOAD_ARGS='-mode connections -connections 300 -connections-per-user 3 -duration 1m'
+```
+
 Alternatively, invoke the command directly. `ORION_LOAD_BASE_URL` can replace `-base-url`.
 
 ```bash
 go run ./cmd/chatload -base-url http://127.0.0.1:8080 -connections 10 -message-rate 5 -duration 10s
 ```
 
-The command writes one JSON report to standard output and exits non-zero if it observes missing or duplicate acknowledgements, missing or duplicate realtime delivery, persistence mismatch, an unexpected protocol frame, or a rejection ratio above `-max-error-rate`. Results describe the load generator and the local environment; they are not production capacity claims.
+The command writes one JSON report to standard output and can persist an indented copy with `-output`. Setup failures occur before measurement and therefore return only an error instead of a misleading zero-value report. Once measurement begins, partial reports are retained even when the command exits non-zero.
+
+Chat mode exits non-zero if it observes missing or duplicate acknowledgements, missing or duplicate realtime delivery, persistence mismatch, an unexpected protocol frame, or a rejection ratio above `-max-error-rate`. Connections mode fails on any unexpected disconnect during the hold period. Results describe the load generator and the local environment; they are not production capacity claims.
 
 User registration, login, live-session creation, and WebSocket connection setup happen before `started_at`; setup cost is therefore excluded from the send and latency measurements.
 
 The report also distinguishes messages that returned a rejected ACK but were subsequently observed in realtime or History. That outcome indicates an ambiguous publish result, such as a publisher-confirm timeout after RabbitMQ accepted the message, and fails the correctness check independently of the configured rejection threshold.
 
-The pull-request Kind workflow runs this smoke profile after the existing Kubernetes E2E. Connection-capacity, steady-state throughput, hot-room fan-out, and traffic-under-failure profiles are intentionally left for subsequent evidence commits so that workload definitions and measured results remain reviewable.
+The pull-request Kind workflow runs the small smoke profile after the existing Kubernetes E2E. The larger post-optimization suite captures steady-state throughput, hot-room fan-out, idle connection capacity, environment evidence, and Prometheus range queries:
+
+```bash
+make observability-install
+make kind-load-baseline
+```
+
+Raw artifacts are written below `artifacts/load/` and intentionally ignored by Git. Curated conclusions belong in [performance/chat-baseline.md](performance/chat-baseline.md).
+
+## Measurement boundary
+
+The baseline script resolves the two ready API Pods, opens one Port-forward to each Pod, and assigns WebSocket connections round-robin across the two addresses. It therefore measures an explicit 50/50 two-replica application workload instead of relying on `kubectl port-forward service/...`, which normally selects one backend Pod for the lifetime of the tunnel.
+
+This still does not measure Kubernetes Service, Ingress, cloud load balancer, or production network capacity. The two `kubectl port-forward` processes and the local load-generator host remain part of the test path and may become the limiting component. If client-observed latency rises while both API Pods remain unsaturated and server-side latency stays flat, repeat the experiment through NodePort or Ingress before attributing the limit to Orion.
+
+## Reading the evidence
+
+Start with `summary.md`; it separates client-visible correctness and latency from infrastructure signals including Publish Confirm, persistence lag, queue depth, database waits, failures, CPU, memory, and throttling. Each profile directory then contains:
+
+```text
+report.json       exact load parameters and client-observed results
+metrics/*.json    raw Prometheus query-range responses
+```
+
+The raw Prometheus files are audit evidence and input for later analysis, not the primary human interface. In normal operation Prometheus retains time series centrally, Grafana renders dashboards, and alerts evaluate selected queries continuously. Access the local dashboards with the commands in [deploy/k8s/observability/README.md](../deploy/k8s/observability/README.md).
+
+Use symptoms together rather than interpreting one metric in isolation:
+
+| Symptom | Supporting signal | Likely boundary |
+| --- | --- | --- |
+| ACK latency and Publish Confirm latency rise together | API CPU remains below its limit | RabbitMQ confirm, disk, or Publisher capacity |
+| ACK latency rises with CPU throttling | Container CPU approaches its limit | API CPU limit or CPU-heavy application path |
+| Broadcast latency rises while ACK stays stable | Slow-client removals or API CPU rises | Room fan-out or WebSocket write path |
+| Persistence lag and Persistence Queue depth rise | Publish and broadcast remain stable | Consumer or MySQL write path |
+| Persistence throughput plateaus and processing p95 is high | Consumer loops are sequential while MySQL is not saturated | Consumer concurrency boundary |
+| SQL wait rate rises and in-use connections reach the pool maximum | Persistence and HTTP latency rise | MySQL pool or slow query bottleneck |
+| Client latency rises while server metrics remain flat | Port-forward/load-generator CPU or network is saturated | Test harness boundary |
+
+Short runs validate plumbing but are not performance evidence. Prometheus scrapes every 15 seconds and histogram rates use a one-minute window, so formal profiles run long enough to contain multiple scrapes and leave a settling interval between profiles.

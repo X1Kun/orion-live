@@ -23,7 +23,7 @@ data:
         {"type":"timeseries","title":"Persistence outcomes","gridPos":{"h":8,"w":8,"x":0,"y":16},"targets":[{"expr":"sum by (result) (rate(orion_persistence_events_total[5m]))","legendFormat":"{{result}}"}]},
         {"type":"timeseries","title":"SQL pool connections","gridPos":{"h":8,"w":8,"x":8,"y":16},"targets":[{"expr":"sum by (state) (orion_db_connections)","legendFormat":"{{state}}"}]},
         {"type":"timeseries","title":"Outbox state","gridPos":{"h":8,"w":8,"x":16,"y":16},"targets":[{"expr":"max by (status) (orion_outbox_events)","legendFormat":"{{status}}"}]},
-        {"type":"timeseries","title":"RabbitMQ queue depth","gridPos":{"h":8,"w":12,"x":0,"y":24},"targets":[{"expr":"rabbitmq_queue_messages{queue=~\"orion.*\"}","legendFormat":"{{queue}}"}]},
+        {"type":"timeseries","title":"RabbitMQ queue depth","gridPos":{"h":8,"w":12,"x":0,"y":24},"targets":[{"expr":"rabbitmq_detailed_queue_messages{queue=~\"orion.*\"}","legendFormat":"{{queue}}"}]},
         {"type":"timeseries","title":"Outbox oldest unpublished age","gridPos":{"h":8,"w":12,"x":12,"y":24},"targets":[{"expr":"max(orion_outbox_oldest_unpublished_age_seconds)","legendFormat":"seconds"}]}
       ],
       "refresh": "10s",

@@ -5,6 +5,7 @@
 /bin/
 /dist/
 /vendor/
+/artifacts/
 
 .env
 .env.*

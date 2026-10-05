@@ -100,6 +100,12 @@ func (c *collector) setErrorLocked(err error) {
 	}
 }
 
+func (c *collector) err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.firstErr
+}
+
 func (c *collector) progress(target int) (complete bool, firstErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -154,13 +160,20 @@ func (c *collector) report(cfg Config, sessionID uint64, startedAt, sendFinished
 			}
 		}
 	}
+	messageRate := cfg.MessageRate
+	if cfg.Mode == ModeConnections {
+		messageRate = 0
+	}
 	report := Report{
+		Mode:                 cfg.Mode,
+		Runtime:              runtimeDetails(),
 		BaseURL:              cfg.BaseURL,
+		ConnectionBaseURLs:   cfg.ConnectionURLs(),
 		LiveSessionID:        sessionID,
 		Connections:          cfg.Connections,
 		ConnectionsPerUser:   cfg.ConnectionsPerUser,
 		TargetMessages:       cfg.TargetMessages(),
-		MessageRate:          cfg.MessageRate,
+		MessageRate:          messageRate,
 		StartedAt:            startedAt.UTC(),
 		ConfiguredDuration:   cfg.Duration.String(),
 		SendDurationSeconds:  sendFinishedAt.Sub(startedAt).Seconds(),

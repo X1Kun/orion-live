@@ -45,7 +45,15 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 		return Report{}, err
 	}
 	results := newCollector(cfg.Connections)
-	clients, err := connectClients(ctx, api, sessionID, tokens, cfg, results)
+	connectionAPIs := make([]*apiClient, 0, len(cfg.ConnectionURLs()))
+	for _, baseURL := range cfg.ConnectionURLs() {
+		connectionAPI, connectionErr := newAPIClient(baseURL, cfg.RequestTimeout)
+		if connectionErr != nil {
+			return Report{}, connectionErr
+		}
+		connectionAPIs = append(connectionAPIs, connectionAPI)
+	}
+	clients, err := connectClients(ctx, connectionAPIs, sessionID, tokens, cfg, results)
 	if err != nil {
 		closeClients(clients)
 		return Report{}, err
@@ -64,6 +72,14 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 	}()
 
 	startedAt := time.Now()
+	if cfg.Mode == ModeConnections {
+		err := holdConnections(ctx, cfg.Duration, results)
+		finishedAt := time.Now()
+		stopReaders()
+		closeClients(clients)
+		readers.Wait()
+		return results.report(cfg, sessionID, startedAt, finishedAt, finishedAt, persistenceResult{}), err
+	}
 	if err := sendLoad(ctx, cfg, clients, results); err != nil {
 		return results.report(cfg, sessionID, startedAt, time.Now(), time.Now(), persistenceResult{}), err
 	}
@@ -87,6 +103,25 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 		return report, err
 	}
 	return report, nil
+}
+
+func holdConnections(ctx context.Context, duration time.Duration, results *collector) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := results.err(); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return results.err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func createUsers(ctx context.Context, api *apiClient, runID, password string, count int) ([]string, error) {
@@ -136,7 +171,7 @@ sendJobs:
 	return tokens, nil
 }
 
-func connectClients(ctx context.Context, api *apiClient, sessionID uint64, tokens []string, cfg Config, results *collector) ([]*loadClient, error) {
+func connectClients(ctx context.Context, apis []*apiClient, sessionID uint64, tokens []string, cfg Config, results *collector) ([]*loadClient, error) {
 	clients := make([]*loadClient, cfg.Connections)
 	jobs := make(chan int)
 	errCh := make(chan error, 1)
@@ -150,6 +185,7 @@ func connectClients(ctx context.Context, api *apiClient, sessionID uint64, token
 			defer workers.Done()
 			for index := range jobs {
 				token := tokens[index/cfg.ConnectionsPerUser]
+				api := apis[index%len(apis)]
 				client, err := connectClient(workerCtx, api, sessionID, token, index, cfg.RequestTimeout, results)
 				if err != nil {
 					select {

@@ -34,3 +34,14 @@ spec:
       path: /metrics
       interval: 15s
       scrapeTimeout: 5s
+    - port: prometheus
+      path: /metrics/detailed
+      params:
+        family:
+          - queue_coarse_metrics
+        vhost:
+          - /
+        queue:
+          - ^orion\.
+      interval: 15s
+      scrapeTimeout: 5s

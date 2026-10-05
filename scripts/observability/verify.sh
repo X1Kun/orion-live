@@ -39,7 +39,7 @@ verify_query() {
 verify_query 'up{namespace="orion-live",service="orion-api"} == 1'
 verify_query 'orion_db_connections'
 verify_query 'orion_outbox_collection_success == 1'
-verify_query 'rabbitmq_queue_messages'
+verify_query 'rabbitmq_detailed_queue_messages{queue="orion.interaction.persistence"}'
 
 if [[ "${ORION_VERIFY_PIPELINE_METRICS:-false}" == "true" ]]; then
   verify_query 'orion_http_requests_total'
