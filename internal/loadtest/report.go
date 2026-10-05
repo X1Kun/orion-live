@@ -1,6 +1,10 @@
 package loadtest
 
-import "time"
+import (
+	"runtime"
+	"runtime/debug"
+	"time"
+)
 
 type LatencySummary struct {
 	Samples         int     `json:"samples"`
@@ -11,7 +15,10 @@ type LatencySummary struct {
 }
 
 type Report struct {
+	Mode                 Mode           `json:"mode"`
+	Runtime              RuntimeDetails `json:"runtime"`
 	BaseURL              string         `json:"base_url"`
+	ConnectionBaseURLs   []string       `json:"connection_base_urls"`
 	LiveSessionID        uint64         `json:"live_session_id"`
 	Connections          int            `json:"connections"`
 	ConnectionsPerUser   int            `json:"connections_per_user"`
@@ -37,4 +44,33 @@ type Report struct {
 	AckLatency           LatencySummary `json:"ack_latency"`
 	BroadcastLatency     LatencySummary `json:"broadcast_latency"`
 	RejectionsByCode     map[string]int `json:"rejections_by_code,omitempty"`
+}
+
+type RuntimeDetails struct {
+	GoVersion   string `json:"go_version"`
+	GOOS        string `json:"goos"`
+	GOARCH      string `json:"goarch"`
+	GitRevision string `json:"git_revision,omitempty"`
+	GitModified bool   `json:"git_modified"`
+}
+
+func (r Report) HasMeasurements() bool {
+	return !r.StartedAt.IsZero()
+}
+
+func runtimeDetails() RuntimeDetails {
+	details := RuntimeDetails{GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	build, ok := debug.ReadBuildInfo()
+	if !ok {
+		return details
+	}
+	for _, setting := range build.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			details.GitRevision = setting.Value
+		case "vcs.modified":
+			details.GitModified = setting.Value == "true"
+		}
+	}
+	return details
 }
