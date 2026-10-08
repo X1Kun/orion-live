@@ -40,13 +40,78 @@ func TestHandleDeliveryClassifiesOutcomes(t *testing.T) {
 				ctx:        context.Background(),
 			}
 			delivery := amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: 1, Headers: amqp.Table{}, Body: tt.body(t)}
-			if err := consumer.handleDelivery(delivery); err != nil {
+			if err := consumer.handleDelivery(context.Background(), delivery); err != nil {
 				t.Fatalf("handleDelivery() error = %v", err)
 			}
 			if acknowledger.acks != tt.wantAck || acknowledger.rejects != tt.wantReject || acknowledger.requeue != tt.wantRequeue {
 				t.Fatalf("acks=%d rejects=%d requeue=%v", acknowledger.acks, acknowledger.rejects, acknowledger.requeue)
 			}
 		})
+	}
+}
+
+func TestStartConsumerRejectsInvalidConcurrencyBeforeOpeningChannel(t *testing.T) {
+	for _, cfg := range []config.Persistence{
+		{Prefetch: 8},
+		{Prefetch: 8, Concurrency: 9},
+		{Prefetch: 128, Concurrency: 65},
+	} {
+		consumer, err := StartConsumer(context.Background(), nil, nil, cfg)
+		if consumer != nil || !errors.Is(err, ErrInvalidConcurrency) {
+			t.Fatalf("StartConsumer(%+v) = (%v, %v), want invalid concurrency", cfg, consumer, err)
+		}
+	}
+}
+
+func TestConsumeSessionUsesConfiguredConcurrency(t *testing.T) {
+	repositoryFake := &blockingChatRepository{
+		entered: make(chan struct{}, 4),
+		release: make(chan struct{}),
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	consumer := &Consumer{
+		repository: repositoryFake,
+		config: config.Persistence{
+			Concurrency: 2, ProcessingTimeout: time.Second,
+		},
+		ctx: runCtx,
+	}
+	deliveriesCh := make(chan amqp.Delivery, 4)
+	acknowledger := &channelAcknowledger{acks: make(chan uint64, 4)}
+	for tag := uint64(1); tag <= 4; tag++ {
+		deliveriesCh <- amqp.Delivery{
+			Acknowledger: acknowledger, DeliveryTag: tag,
+			Headers: amqp.Table{}, Body: persistenceTestBody(t),
+		}
+	}
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- consumer.consumeSession(&consumerSession{deliveriesCh: deliveriesCh})
+	}()
+
+	for range 2 {
+		select {
+		case <-repositoryFake.entered:
+		case <-time.After(time.Second):
+			t.Fatal("two deliveries did not begin concurrently")
+		}
+	}
+	close(repositoryFake.release)
+	for range 4 {
+		select {
+		case <-acknowledger.acks:
+		case <-time.After(time.Second):
+			t.Fatal("delivery was not acknowledged")
+		}
+	}
+	cancel()
+	select {
+	case err := <-doneCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("consumeSession() error = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("consumeSession() did not stop")
 	}
 }
 
@@ -70,6 +135,21 @@ type chatRepositoryFake struct {
 	err    error
 }
 
+type blockingChatRepository struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingChatRepository) Persist(ctx context.Context, _ string, _ messaging.Event, _ messaging.ChatMessageAcceptedPayload) (repository.ChatPersistenceResult, error) {
+	r.entered <- struct{}{}
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-r.release:
+		return repository.ChatPersisted, nil
+	}
+}
+
 func (r *chatRepositoryFake) Persist(context.Context, string, messaging.Event, messaging.ChatMessageAcceptedPayload) (repository.ChatPersistenceResult, error) {
 	return r.result, r.err
 }
@@ -79,6 +159,19 @@ type persistenceAcknowledger struct {
 	rejects int
 	requeue bool
 }
+
+type channelAcknowledger struct {
+	acks chan uint64
+}
+
+func (a *channelAcknowledger) Ack(tag uint64, _ bool) error {
+	a.acks <- tag
+	return nil
+}
+
+func (*channelAcknowledger) Nack(uint64, bool, bool) error { return nil }
+
+func (*channelAcknowledger) Reject(uint64, bool) error { return nil }
 
 func (a *persistenceAcknowledger) Ack(uint64, bool) error {
 	a.acks++

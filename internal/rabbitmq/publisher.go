@@ -99,7 +99,9 @@ func (p *Publisher) Publish(ctx context.Context, event messaging.Event) (publish
 	if err != nil {
 		return err
 	}
+	acquireStarted := time.Now()
 	lane, err := p.acquire(ctx)
+	metrics.RabbitMQPublishAcquireDuration.Observe(time.Since(acquireStarted).Seconds())
 	if err != nil {
 		return err
 	}

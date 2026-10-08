@@ -28,6 +28,9 @@ func main() {
 	flag.IntVar(&cfg.Connections, "connections", cfg.Connections, "number of WebSocket connections")
 	flag.IntVar(&cfg.ConnectionsPerUser, "connections-per-user", cfg.ConnectionsPerUser, "WebSocket connections sharing one user; must not exceed the server limit")
 	flag.IntVar(&cfg.MessageRate, "message-rate", cfg.MessageRate, "aggregate Chat messages sent per second")
+	flag.IntVar(&cfg.Senders, "senders", 0, "number of connections sending Chat; zero uses all")
+	flag.IntVar(&cfg.BurstRate, "burst-rate", 0, "optional middle phase messages per second")
+	flag.DurationVar(&cfg.BurstDuration, "burst-duration", 0, "optional middle phase duration; background duration is split before and after")
 	flag.DurationVar(&cfg.Duration, "duration", cfg.Duration, "message sending duration")
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", cfg.RequestTimeout, "HTTP, WebSocket handshake, and write timeout")
 	flag.DurationVar(&cfg.DrainTimeout, "drain-timeout", cfg.DrainTimeout, "maximum wait for ACKs and realtime fan-out")
@@ -45,7 +48,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	report, err := loadtest.Run(ctx, cfg)
-	if report.HasMeasurements() {
+	if report.HasMeasurements() || outputPath != "" {
 		if encodeErr := writeReport(report, outputPath); encodeErr != nil {
 			fmt.Fprintf(os.Stderr, "write load report: %v\n", encodeErr)
 			os.Exit(1)
@@ -58,8 +61,10 @@ func main() {
 }
 
 func writeReport(report loadtest.Report, outputPath string) error {
-	if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
-		return err
+	if report.HasMeasurements() {
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
 	}
 	if outputPath == "" {
 		return nil

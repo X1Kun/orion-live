@@ -8,10 +8,14 @@ phase=${1:-all}
 duration=${ORION_LOAD_DURATION:-60s}
 cooldown=${ORION_LOAD_COOLDOWN:-35s}
 scrape_lag=${ORION_LOAD_SCRAPE_LAG:-35s}
+continue_on_failure=${ORION_LOAD_CONTINUE_ON_FAILURE:-false}
+fanout_rate=${ORION_FANOUT_RATE:-1}
+fanout_rates=${ORION_FANOUT_RATES:-${fanout_rate}}
 output_root=${ORION_LOAD_OUTPUT_DIR:-${project_root}/artifacts/load/$(date -u +%Y%m%dT%H%M%SZ)}
+failed_profiles=()
 
 case "${phase}" in
-  all|throughput|fanout|connections) ;;
+  all|throughput|fanout|connections|mixed) ;;
   *)
     echo "usage: $0 [all|throughput|fanout|connections]" >&2
     exit 1
@@ -117,6 +121,7 @@ go build -o "${binary}" ./cmd/chatload
   free -h
   kubectl get nodes -o wide
   kubectl -n "${namespace}" get pods -o wide
+  kubectl -n "${namespace}" get configmap/orion-runtime-config -o yaml
   kubectl -n "${namespace}" get deployment/orion-api statefulset/mysql statefulset/redis statefulset/rabbitmq -o yaml
 } >"${output_root}/environment.txt"
 
@@ -140,6 +145,10 @@ metric_names=(
   mysql_cpu
   mysql_memory
   slow_client_removals
+  admission_unavailable
+  admission_p95
+  publisher_acquire_p95
+  frame_processing_p95
 )
 metric_queries=(
   'histogram_quantile(0.95, sum by (le) (rate(orion_rabbitmq_publish_duration_seconds_bucket{event_type="chat.message.accepted"}[1m])))'
@@ -156,6 +165,10 @@ metric_queries=(
   'sum(rate(container_cpu_usage_seconds_total{namespace="orion-live",pod="mysql-0",container="mysql"}[1m]))'
   'sum(container_memory_working_set_bytes{namespace="orion-live",pod="mysql-0",container="mysql"})'
   'sum(increase(orion_websocket_slow_client_removals_total[1m]))'
+  'sum(rate(orion_chat_admission_total{result="unavailable"}[1m]))'
+  'histogram_quantile(0.95, sum by (le) (rate(orion_chat_admission_duration_seconds_bucket[1m])))'
+  'histogram_quantile(0.95, sum by (le) (rate(orion_rabbitmq_publish_acquire_duration_seconds_bucket[1m])))'
+  'histogram_quantile(0.95, sum by (le) (rate(orion_websocket_frame_processing_duration_seconds_bucket[1m])))'
 )
 
 capture_metrics() {
@@ -187,8 +200,13 @@ run_profile() {
   local end
   local status=0
   wait_for_empty_persistence_queue
+  log_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "running ${name}"
-  "${binary}" "${common_args[@]}" -output "${profile_dir}/report.json" "$@" >/dev/null || status=$?
+  "${binary}" "${common_args[@]}" -output "${profile_dir}/report.json" "$@" >"${profile_dir}/stdout.json" 2>"${profile_dir}/error.txt" || status=$?
+  printf '%s\n' "${status}" >"${profile_dir}/exit-code.txt"
+  for pod in "${api_pods[@]}"; do
+    kubectl -n "${namespace}" logs "${pod}" --timestamps --since-time="${log_start}" >"${profile_dir}/${pod}.log" 2>&1 || true
+  done
   if [[ -s "${profile_dir}/report.json" ]]; then
     start=$(date -u -d "$(jq -r '.started_at' "${profile_dir}/report.json")" +%s)
   else
@@ -201,6 +219,11 @@ run_profile() {
     write_summary
     cat "${output_root}/summary.md"
     echo "profile failed: ${name}; inspect ${profile_dir}" >&2
+    if [[ "${continue_on_failure}" == true ]]; then
+      failed_profiles+=("${name}")
+      sleep "${cooldown}"
+      return
+    fi
     exit "${status}"
   fi
   sleep "${cooldown}"
@@ -214,14 +237,23 @@ wait_for_query 'orion_rabbitmq_publish_duration_seconds_count{event_type="chat.m
 sleep "${cooldown}"
 
 if [[ "${phase}" == all || "${phase}" == throughput ]]; then
-  for rate in ${ORION_THROUGHPUT_RATES:-1 5 10 25 50}; do
-    run_profile "throughput-${rate}mps" -mode chat -connections 20 -message-rate "${rate}" -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  for repetition in $(seq 1 "${ORION_LOAD_REPEATS:-1}"); do
+    for rate in ${ORION_THROUGHPUT_RATES:-1 5 10 25 50}; do
+      run_profile "throughput-${rate}mps-run${repetition}" -mode chat -connections 20 -message-rate "${rate}" -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+    done
   done
 fi
 
+if [[ "${phase}" == mixed ]]; then
+  run_profile mixed-steady -connections 1000 -senders 20 -message-rate 25 -duration 2m -drain-timeout 1m -history-timeout 1m
+  run_profile mixed-burst -connections 1000 -senders 20 -message-rate 10 -duration 2m -burst-rate 50 -burst-duration 30s -drain-timeout 1m -history-timeout 1m
+fi
+
 if [[ "${phase}" == all || "${phase}" == fanout ]]; then
-  for connections in ${ORION_FANOUT_CONNECTIONS:-10 50 100 300}; do
-    run_profile "fanout-${connections}c" -mode chat -connections "${connections}" -message-rate 1 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  for rate in ${fanout_rates}; do
+    for connections in ${ORION_FANOUT_CONNECTIONS:-10 50 100 300}; do
+      run_profile "fanout-${connections}c-${rate}mps" -mode chat -connections "${connections}" -message-rate "${rate}" -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+    done
   done
 fi
 
@@ -234,3 +266,7 @@ fi
 write_summary
 cat "${output_root}/summary.md"
 echo "baseline artifacts: ${output_root}"
+if (( ${#failed_profiles[@]} > 0 )); then
+  echo "failed profiles: ${failed_profiles[*]}" >&2
+  exit 1
+fi

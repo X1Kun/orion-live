@@ -12,10 +12,32 @@ import (
 
 const setupConcurrency = 8
 
-func Run(ctx context.Context, cfg Config) (Report, error) {
+func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
+	stage := "configuration"
+	persistenceCheck := "not_checked"
+	if cfg.Mode == ModeConnections {
+		persistenceCheck = "not_applicable"
+	}
+	defer func() {
+		if !report.HasMeasurements() {
+			report.Mode = cfg.Mode
+			report.BaseURL = cfg.BaseURL
+			report.Connections = cfg.Connections
+			report.Runtime = runtimeDetails()
+		}
+		report.PersistenceCheck = persistenceCheck
+		if runErr != nil {
+			report.Status = "failed"
+			report.FailureStage = stage
+			report.FailureReason = runErr.Error()
+		} else {
+			report.Status = "passed"
+		}
+	}()
 	if err := cfg.Validate(); err != nil {
 		return Report{}, err
 	}
+	stage = "setup"
 	api, err := newAPIClient(cfg.BaseURL, cfg.RequestTimeout)
 	if err != nil {
 		return Report{}, err
@@ -53,6 +75,7 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 		}
 		connectionAPIs = append(connectionAPIs, connectionAPI)
 	}
+	stage = "connect"
 	clients, err := connectClients(ctx, connectionAPIs, sessionID, tokens, cfg, results)
 	if err != nil {
 		closeClients(clients)
@@ -73,6 +96,7 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 
 	startedAt := time.Now()
 	if cfg.Mode == ModeConnections {
+		stage = "hold"
 		err := holdConnections(ctx, cfg.Duration, results)
 		finishedAt := time.Now()
 		stopReaders()
@@ -80,25 +104,33 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 		readers.Wait()
 		return results.report(cfg, sessionID, startedAt, finishedAt, finishedAt, persistenceResult{}), err
 	}
+	stage = "send"
 	if err := sendLoad(ctx, cfg, clients, results); err != nil {
 		return results.report(cfg, sessionID, startedAt, time.Now(), time.Now(), persistenceResult{}), err
 	}
 	sendFinishedAt := time.Now()
+	stage = "delivery"
 	if err := waitForDelivery(ctx, cfg.DrainTimeout, cfg.TargetMessages(), results); err != nil {
 		return results.report(cfg, sessionID, startedAt, sendFinishedAt, time.Now(), persistenceResult{}), err
 	}
 
 	accepted := results.acceptedIDs()
 	rejected := results.rejectedIDs()
+	stage = "persistence"
+	persistenceCheck = "incomplete"
 	persistence, err := waitForHistory(ctx, api, hostToken, sessionID, accepted, rejected, cfg.HistoryTimeout)
+	if err == nil {
+		persistenceCheck = "complete"
+	}
 	finishedAt := time.Now()
 	stopReaders()
 	closeClients(clients)
 	readers.Wait()
-	report := results.report(cfg, sessionID, startedAt, sendFinishedAt, finishedAt, persistence)
+	report = results.report(cfg, sessionID, startedAt, sendFinishedAt, finishedAt, persistence)
 	if err != nil {
 		return report, err
 	}
+	stage = "validation"
 	if err := validateReport(report, cfg.MaxErrorRate); err != nil {
 		return report, err
 	}
@@ -221,10 +253,30 @@ sendJobs:
 }
 
 func sendLoad(ctx context.Context, cfg Config, clients []*loadClient, results *collector) error {
-	interval := time.Second / time.Duration(cfg.MessageRate)
+	senders := cfg.Senders
+	if senders == 0 {
+		senders = len(clients)
+	}
+	index := 0
+	if cfg.BurstRate == 0 {
+		return sendPhase(ctx, cfg.MessageRate, cfg.TargetMessages(), clients[:senders], results, &index)
+	}
+	background := int(cfg.Duration * time.Duration(cfg.MessageRate) / time.Second)
+	if err := sendPhase(ctx, cfg.MessageRate, background/2, clients[:senders], results, &index); err != nil {
+		return err
+	}
+	burst := int(cfg.BurstDuration * time.Duration(cfg.BurstRate) / time.Second)
+	if err := sendPhase(ctx, cfg.BurstRate, burst, clients[:senders], results, &index); err != nil {
+		return err
+	}
+	return sendPhase(ctx, cfg.MessageRate, background-background/2, clients[:senders], results, &index)
+}
+
+func sendPhase(ctx context.Context, rate, count int, clients []*loadClient, results *collector, index *int) error {
+	interval := time.Second / time.Duration(rate)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for index := range cfg.TargetMessages() {
+	for range count {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -236,9 +288,13 @@ func sendLoad(ctx context.Context, cfg Config, clients []*loadClient, results *c
 		}
 		sentAt := time.Now()
 		results.recordSent(messageID, sentAt)
-		if err := clients[index%len(clients)].send(messageID, fmt.Sprintf("load message %d", index)); err != nil {
-			return fmt.Errorf("send message %d: %w", index, err)
+		if err := clients[*index%len(clients)].send(messageID, fmt.Sprintf("load message %d", *index)); err != nil {
+			if firstErr := results.err(); firstErr != nil {
+				return fmt.Errorf("send message %d: %w; first reader error: %v", *index, err, firstErr)
+			}
+			return fmt.Errorf("send message %d: %w", *index, err)
 		}
+		*index++
 	}
 	return nil
 }

@@ -99,6 +99,18 @@ var (
 		[]string{"result"},
 	)
 
+	RabbitMQPublishAcquireDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "orion_rabbitmq_publish_acquire_duration_seconds",
+		Help:    "Time waiting to acquire a Publisher lane, including failed acquisitions.",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+	})
+
+	WebSocketFrameProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "orion_websocket_frame_processing_duration_seconds",
+		Help:    "Application processing time for one WebSocket frame before the next read.",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	})
+
 	PersistenceProcessingDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "orion_persistence_processing_duration_seconds",

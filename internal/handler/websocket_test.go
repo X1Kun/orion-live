@@ -250,6 +250,7 @@ func webSocketTestConfig() config.WebSocket {
 		PingInterval:               30 * time.Second,
 		ReadLimitBytes:             4096,
 		ClientSendQueueCapacity:    8,
+		ClientReceiveQueueCapacity: 16,
 		RoomBroadcastQueueCapacity: 8,
 		MaxConnections:             16,
 		MaxConnectionsPerUser:      4,

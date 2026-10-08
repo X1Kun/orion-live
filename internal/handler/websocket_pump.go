@@ -5,13 +5,18 @@ import (
 	"errors"
 	"time"
 
+	"github.com/X1Kun/orion-live/internal/metrics"
 	roomhub "github.com/X1Kun/orion-live/internal/websocket"
 	gorilla "github.com/gorilla/websocket"
 )
 
-var errWebSocketMessageTypeUnsupported = errors.New("WebSocket message type is not supported")
+var (
+	errWebSocketMessageTypeUnsupported = errors.New("WebSocket message type is not supported")
+	errWebSocketInboundQueueFull       = errors.New("WebSocket inbound queue is full")
+)
 
-func (h *WebSocketHandler) readPump(ctx context.Context, connection *gorilla.Conn, client *roomhub.Client, liveSessionID, userID uint64) error {
+func (h *WebSocketHandler) readPump(connection *gorilla.Conn, inbound chan<- []byte) error {
+	defer close(inbound)
 	connection.SetReadLimit(h.config.ReadLimitBytes)
 	if err := connection.SetReadDeadline(time.Now().Add(h.config.PongTimeout)); err != nil {
 		return err
@@ -28,8 +33,35 @@ func (h *WebSocketHandler) readPump(ctx context.Context, connection *gorilla.Con
 		if messageType != gorilla.TextMessage {
 			return errWebSocketMessageTypeUnsupported
 		}
-		if err := h.handleClientFrame(ctx, client, liveSessionID, userID, body); err != nil {
+		select {
+		case inbound <- body:
+		default:
+			return errWebSocketInboundQueueFull
+		}
+	}
+}
+
+func (h *WebSocketHandler) processPump(ctx context.Context, inbound <-chan []byte, client *roomhub.Client, liveSessionID, userID uint64) error {
+	for {
+		if err := ctx.Err(); err != nil {
 			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case body, ok := <-inbound:
+			if !ok {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			started := time.Now()
+			err := h.handleClientFrame(ctx, client, liveSessionID, userID, body)
+			metrics.WebSocketFrameProcessingDuration.Observe(time.Since(started).Seconds())
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -71,6 +103,7 @@ func writeWebSocketClose(connection *gorilla.Conn, code int, message string, tim
 
 func unexpectedWebSocketError(err error) bool {
 	return err != nil &&
+		!errors.Is(err, context.Canceled) &&
 		!errors.Is(err, errWebSocketMessageTypeUnsupported) &&
 		!errors.Is(err, errWebSocketOutboundQueueFull) &&
 		!gorilla.IsCloseError(err, gorilla.CloseNormalClosure, gorilla.CloseGoingAway, gorilla.CloseNoStatusReceived)

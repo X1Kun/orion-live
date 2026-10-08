@@ -22,6 +22,9 @@ type Config struct {
 	Connections        int
 	ConnectionsPerUser int
 	MessageRate        int
+	Senders            int
+	BurstRate          int
+	BurstDuration      time.Duration
 	Duration           time.Duration
 	RequestTimeout     time.Duration
 	DrainTimeout       time.Duration
@@ -44,6 +47,15 @@ func DefaultConfig() Config {
 }
 
 func (c Config) Validate() error {
+	if c.Senders < 0 || c.Senders > c.Connections {
+		return errors.New("senders must be between zero and connections (zero uses all connections)")
+	}
+	if c.BurstRate < 0 || c.BurstDuration < 0 || (c.BurstRate == 0) != (c.BurstDuration == 0) {
+		return errors.New("burst rate and duration must both be positive or both zero")
+	}
+	if c.BurstRate > int(time.Second) {
+		return errors.New("burst rate is too high")
+	}
 	if c.Mode != ModeChat && c.Mode != ModeConnections {
 		return errors.New("mode must be chat or connections")
 	}
@@ -89,5 +101,5 @@ func (c Config) TargetMessages() int {
 	if c.Mode == ModeConnections {
 		return 0
 	}
-	return int(c.Duration * time.Duration(c.MessageRate) / time.Second)
+	return int(c.Duration*time.Duration(c.MessageRate)/time.Second) + int(c.BurstDuration*time.Duration(c.BurstRate)/time.Second)
 }

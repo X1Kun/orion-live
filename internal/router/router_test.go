@@ -43,6 +43,7 @@ func TestLiveSessionRouteAuthenticationScope(t *testing.T) {
 		PingInterval:               30 * time.Second,
 		ReadLimitBytes:             4096,
 		ClientSendQueueCapacity:    1,
+		ClientReceiveQueueCapacity: 16,
 		RoomBroadcastQueueCapacity: 1,
 		MaxConnections:             1,
 		MaxConnectionsPerUser:      1,
