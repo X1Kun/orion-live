@@ -92,31 +92,50 @@ func (h *WebSocketHandler) Connect(c *gin.Context) {
 	}
 	metrics.WebSocketConnections.Inc()
 	defer metrics.WebSocketConnections.Dec()
+	connectionCtx, cancelConnection := context.WithCancel(c.Request.Context())
+	defer cancelConnection()
+	inbound := make(chan []byte, h.config.ClientReceiveQueueCapacity)
+	processorDone := make(chan error, 1)
+	go func() {
+		err := h.processPump(connectionCtx, inbound, client, liveSessionID, userID)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			writeWebSocketClose(connection, gorilla.CloseTryAgainLater, "message processing stopped", h.config.WriteTimeout)
+			cancelConnection()
+			_ = connection.Close()
+		}
+		processorDone <- err
+	}()
 
 	writerDone := make(chan error, 1)
 	go func() {
 		writerDone <- h.writePump(connection, client)
+		cancelConnection()
 		_ = connection.Close()
 	}()
 
-	readErr := h.readPump(c.Request.Context(), connection, client, liveSessionID, userID)
+	readErr := h.readPump(connection, inbound)
+	cancelConnection()
 	if errors.Is(readErr, errWebSocketMessageTypeUnsupported) {
 		writeWebSocketClose(connection, gorilla.CloseUnsupportedData, readErr.Error(), h.config.WriteTimeout)
 		_ = connection.Close()
-	} else if errors.Is(readErr, errWebSocketOutboundQueueFull) {
+	} else if errors.Is(readErr, errWebSocketInboundQueueFull) {
 		writeWebSocketClose(connection, gorilla.CloseTryAgainLater, readErr.Error(), h.config.WriteTimeout)
 		_ = connection.Close()
 	}
 	h.hub.Leave(liveSessionID, client)
 	writeErr := <-writerDone
+	processErr := <-processorDone
 	_ = connection.Close()
 
 	fields := logger.Log.WithField("live_session_id", liveSessionID).WithField("user_id", userID)
 	if unexpectedWebSocketError(readErr) {
-		fields.WithError(readErr).Debug("WebSocket reader stopped")
+		fields.WithError(readErr).Warn("WebSocket reader stopped")
 	}
 	if unexpectedWebSocketError(writeErr) {
-		fields.WithError(writeErr).Debug("WebSocket writer stopped")
+		fields.WithError(writeErr).Warn("WebSocket writer stopped")
+	}
+	if unexpectedWebSocketError(processErr) {
+		fields.WithError(processErr).Warn("WebSocket processor stopped")
 	}
 }
 

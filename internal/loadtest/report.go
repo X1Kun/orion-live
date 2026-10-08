@@ -15,6 +15,10 @@ type LatencySummary struct {
 }
 
 type Report struct {
+	Status               string         `json:"status"`
+	FailureStage         string         `json:"failure_stage,omitempty"`
+	FailureReason        string         `json:"failure_reason,omitempty"`
+	PersistenceCheck     string         `json:"persistence_check"`
 	Mode                 Mode           `json:"mode"`
 	Runtime              RuntimeDetails `json:"runtime"`
 	BaseURL              string         `json:"base_url"`
@@ -24,6 +28,9 @@ type Report struct {
 	ConnectionsPerUser   int            `json:"connections_per_user"`
 	TargetMessages       int            `json:"target_messages"`
 	MessageRate          int            `json:"message_rate_per_second"`
+	Senders              int            `json:"senders"`
+	BurstRate            int            `json:"burst_rate_per_second"`
+	BurstDuration        string         `json:"burst_duration"`
 	AchievedMessageRate  float64        `json:"achieved_message_rate_per_second"`
 	StartedAt            time.Time      `json:"started_at"`
 	ConfiguredDuration   string         `json:"configured_duration"`

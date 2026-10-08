@@ -55,6 +55,22 @@ func TestConnectionsModeAllowsNoMessages(t *testing.T) {
 	}
 }
 
+func TestMixedBurstMessageCount(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Connections = 1000
+	cfg.Senders = 20
+	cfg.MessageRate = 10
+	cfg.Duration = 2 * time.Minute
+	cfg.BurstRate = 50
+	cfg.BurstDuration = 30 * time.Second
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TargetMessages() != 2700 {
+		t.Fatalf("TargetMessages() = %d, want 2700", cfg.TargetMessages())
+	}
+}
+
 func TestConnectionURLs(t *testing.T) {
 	cfg := DefaultConfig()
 	if got := cfg.ConnectionURLs(); len(got) != 1 || got[0] != cfg.BaseURL {

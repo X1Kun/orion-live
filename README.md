@@ -21,7 +21,7 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - Per-API realtime RabbitMQ subscription and process-local Hub delivery
 - Transactional `live_session.ended` Outbox with leased, fenced publication
 - Confirmed WebSocket Chat ingress with atomic Redis admission
-- Durable Chat persistence with Inbox deduplication, bounded retry, and DLQ handling
+- Durable Chat persistence with bounded concurrent processing, Inbox deduplication, retry, and DLQ handling
 - Authenticated Chat history with stable cursor pagination
 - `room.ready` synchronization and bounded reconnect recovery coverage
 - Kustomize-based two-replica API and migration Job manifests

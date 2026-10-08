@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -102,27 +103,58 @@ func (c *Consumer) run(current *consumerSession) {
 }
 
 func (c *Consumer) consumeSession(session *consumerSession) error {
+	sessionCtx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+	workerErrCh := make(chan error, 1)
+	var workers sync.WaitGroup
+	workers.Add(c.config.Concurrency)
+	for range c.config.Concurrency {
+		go func() {
+			defer workers.Done()
+			if err := c.consumeDeliveries(sessionCtx, session.deliveriesCh); err != nil {
+				select {
+				case workerErrCh <- err:
+					cancel()
+				default:
+				}
+			}
+		}()
+	}
+
+	var consumeErr error
+	select {
+	case <-c.ctx.Done():
+		consumeErr = c.ctx.Err()
+	case amqpErr, ok := <-session.channelClosedCh:
+		if ok && amqpErr != nil {
+			consumeErr = fmt.Errorf("persistence channel closed: %w", amqpErr)
+		} else {
+			consumeErr = ErrConsumerNotReady
+		}
+	case consumeErr = <-workerErrCh:
+	}
+	cancel()
+	workers.Wait()
+	return consumeErr
+}
+
+func (c *Consumer) consumeDeliveries(ctx context.Context, deliveriesCh <-chan amqp.Delivery) error {
 	for {
 		select {
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case amqpErr, ok := <-session.channelClosedCh:
-			if ok && amqpErr != nil {
-				return fmt.Errorf("persistence channel closed: %w", amqpErr)
-			}
-			return ErrConsumerNotReady
-		case delivery, ok := <-session.deliveriesCh:
+		case <-ctx.Done():
+			return nil
+		case delivery, ok := <-deliveriesCh:
 			if !ok {
 				return ErrConsumerNotReady
 			}
-			if err := c.handleDelivery(delivery); err != nil {
+			if err := c.handleDelivery(ctx, delivery); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (c *Consumer) handleDelivery(delivery amqp.Delivery) error {
+func (c *Consumer) handleDelivery(ctx context.Context, delivery amqp.Delivery) error {
 	started := time.Now()
 	metricResult := "error"
 	defer func() {
@@ -133,7 +165,7 @@ func (c *Consumer) handleDelivery(delivery amqp.Delivery) error {
 		metricResult = "malformed"
 		return deadLetter(delivery, "malformed")
 	}
-	processCtx, cancel := context.WithTimeout(c.ctx, c.config.ProcessingTimeout)
+	processCtx, cancel := context.WithTimeout(ctx, c.config.ProcessingTimeout)
 	result, err := c.repository.Persist(processCtx, consumerName, event, payload)
 	cancel()
 	if err != nil {

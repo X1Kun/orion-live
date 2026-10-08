@@ -1,4 +1,4 @@
-.PHONY: build check test-integration compose-config k8s-render observability-render load-smoke kind-load-smoke kind-load-baseline kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete observability-install observability-verify observability-delete migrate up down logs
+.PHONY: build check test-integration compose-config k8s-render observability-render load-smoke kind-load-smoke kind-load-baseline kind-capacity kind-create kind-deploy kind-smoke kind-resilience kind-test kind-e2e kind-delete observability-install observability-verify observability-delete migrate up down logs
 
 build:
 	go build ./cmd/server ./cmd/migrate
@@ -38,6 +38,9 @@ kind-load-smoke:
 
 kind-load-baseline:
 	./scripts/load/kind-baseline.sh $(LOAD_BASELINE_PHASE)
+
+kind-capacity:
+	./scripts/load/kind-capacity.sh $(CAPACITY_PHASE)
 
 kind-create:
 	./scripts/kind/create.sh

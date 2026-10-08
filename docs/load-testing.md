@@ -46,6 +46,8 @@ go run ./cmd/chatload -base-url http://127.0.0.1:8080 -connections 10 -message-r
 
 The command writes one JSON report to standard output and can persist an indented copy with `-output`. Setup failures occur before measurement and therefore return only an error instead of a misleading zero-value report. Once measurement begins, partial reports are retained even when the command exits non-zero.
 
+When `-output` is provided, setup failures also save a report with status, failure stage, and failure reason, while keeping standard output free of unmeasured zero-value results. Reports mark Persistence verification as `not_checked`, `incomplete`, `complete`, or `not_applicable`. Summary displays unverified counts as `n/a`; legacy reports without verification metadata remain explicitly unknown. `complete` means History verification finished; overall correctness can still fail subsequently.
+
 Chat mode exits non-zero if it observes missing or duplicate acknowledgements, missing or duplicate realtime delivery, persistence mismatch, an unexpected protocol frame, or a rejection ratio above `-max-error-rate`. Connections mode fails on any unexpected disconnect during the hold period. Results describe the load generator and the local environment; they are not production capacity claims.
 
 User registration, login, live-session creation, and WebSocket connection setup happen before `started_at`; setup cost is therefore excluded from the send and latency measurements.
@@ -61,7 +63,13 @@ make kind-load-baseline
 
 Raw artifacts are written below `artifacts/load/` and intentionally ignored by Git. Curated conclusions belong in [performance/chat-baseline.md](performance/chat-baseline.md).
 
+Long suites can set `ORION_LOAD_CONTINUE_ON_FAILURE=true` to preserve a failed profile, wait for the Persistence Queue to drain, and continue with later scenarios. `ORION_FANOUT_RATE` controls the aggregate Chat rate used by Fan-out profiles.
+
+After deploying the candidate build, `make kind-capacity` runs the complete capacity map: Persistence concurrency 4/8 A/B, throughput, Fan-out connection and rate scaling, idle connection limits, and a 50 msg/s burst. It restores the original Persistence concurrency when finished. Capacity failures are retained as evidence and do not prevent later suites from running.
+
 ## Measurement boundary
+
+For anomaly diagnosis, run `make kind-capacity CAPACITY_PHASE=diagnostics`. It repeats concurrency-4 rates 25/50 and concurrency-8 rate 40 three times each, retaining profile exit codes, errors, API logs, and Admission metrics. Run `make kind-capacity CAPACITY_PHASE=mixed` for concurrency-8 profiles with 1000 total connections and 20 sending connections: steady 25 msg/s, then 10 msg/s background with a middle 50 msg/s burst lasting 30 seconds. Both commands restore the original concurrency configuration on exit.
 
 The baseline script resolves the two ready API Pods, opens one Port-forward to each Pod, and assigns WebSocket connections round-robin across the two addresses. It therefore measures an explicit 50/50 two-replica application workload instead of relying on `kubectl port-forward service/...`, which normally selects one backend Pod for the lifetime of the tunnel.
 

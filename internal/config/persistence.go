@@ -7,6 +7,7 @@ import (
 
 type Persistence struct {
 	Prefetch          int
+	Concurrency       int
 	ProcessingTimeout time.Duration
 	RetryMinDelay     time.Duration
 	RetryMaxDelay     time.Duration
@@ -15,6 +16,10 @@ type Persistence struct {
 
 func loadPersistence() (Persistence, error) {
 	prefetch, err := envInt("PERSISTENCE_PREFETCH", 32)
+	if err != nil {
+		return Persistence{}, err
+	}
+	concurrency, err := envInt("PERSISTENCE_CONCURRENCY", 4)
 	if err != nil {
 		return Persistence{}, err
 	}
@@ -35,7 +40,7 @@ func loadPersistence() (Persistence, error) {
 		return Persistence{}, err
 	}
 	return Persistence{
-		Prefetch: prefetch, ProcessingTimeout: processingTimeout,
+		Prefetch: prefetch, Concurrency: concurrency, ProcessingTimeout: processingTimeout,
 		RetryMinDelay: retryMinDelay, RetryMaxDelay: retryMaxDelay,
 		DeliveryLimit: deliveryLimit,
 	}, nil
@@ -44,6 +49,12 @@ func loadPersistence() (Persistence, error) {
 func (c Persistence) validate() error {
 	if c.Prefetch <= 0 {
 		return errors.New("PERSISTENCE_PREFETCH must be positive")
+	}
+	if c.Concurrency <= 0 || c.Concurrency > 64 {
+		return errors.New("PERSISTENCE_CONCURRENCY must be between 1 and 64")
+	}
+	if c.Concurrency > c.Prefetch {
+		return errors.New("PERSISTENCE_CONCURRENCY must not exceed PERSISTENCE_PREFETCH")
 	}
 	if c.ProcessingTimeout <= 0 {
 		return errors.New("PERSISTENCE_PROCESSING_TIMEOUT must be positive")

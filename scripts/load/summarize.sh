@@ -8,12 +8,15 @@ metric_max() {
   local file=$1
   local scale=${2:-1}
   local empty_value=${3:-n/a}
+  local window_start=${4:-0}
+  local window_end=${5:-9999999999}
   if [[ ! -s "${file}" ]]; then
     echo "${empty_value}"
     return
   fi
-  jq -r --argjson scale "${scale}" --arg empty "${empty_value}" '
-    [.data.result[].values[]?[1] | select(. != "NaN") | tonumber] |
+  jq -r --argjson scale "${scale}" --arg empty "${empty_value}" \
+    --argjson window_start "${window_start}" --argjson window_end "${window_end}" '
+    [.data.result[].values[]? | select(.[0] >= $window_start and .[0] <= $window_end) | .[1] | select(. != "NaN") | tonumber] |
     if length == 0 then $empty else ((max * $scale * 100) | round / 100) end
   ' "${file}"
 }
@@ -26,13 +29,20 @@ echo "# Load baseline summary"
 echo
 echo "## Client-observed results"
 echo
-echo "| Profile | Mode | Connections | Rate | Accepted | Rejected | Deliveries | Persisted | ACK p95 ms | Broadcast p95 ms |"
-echo "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+echo "| Profile | Status | Failure stage | Mode | Connections | Rate | Accepted | Rejected | Deliveries | Persisted | Persistence check | ACK p95 ms | Broadcast p95 ms |"
+echo "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: |"
 
 while IFS= read -r report; do
   profile=$(basename "$(dirname "${report}")")
   values=$(jq -r '[.mode, .connections, .message_rate_per_second, .accepted, .rejected, .realtime_deliveries, .persisted_messages, .ack_latency.p95_ms, .broadcast_latency.p95_ms] | @tsv' "${report}")
   IFS=$'\t' read -r mode connections rate accepted rejected deliveries persisted ack_p95 broadcast_p95 <<<"${values}"
+  status=$(jq -r '.status // "unknown (legacy)"' "${report}")
+  failure_stage=$(jq -r '.failure_stage // "—"' "${report}")
+  persistence_check=$(jq -r '.persistence_check // "unknown (legacy)"' "${report}")
+  case "${persistence_check}" in
+    not_checked|not_applicable) persisted=n/a ;;
+    'unknown (legacy)') [[ "${persisted}" != 0 ]] || persisted='unknown' ;;
+  esac
   if [[ "${mode}" == connections ]]; then
     ack_p95=n/a
     broadcast_p95=n/a
@@ -40,9 +50,9 @@ while IFS= read -r report; do
     ack_p95=$(printf '%.2f' "${ack_p95}")
     broadcast_p95=$(printf '%.2f' "${broadcast_p95}")
   fi
-  printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
-    "${profile}" "${mode}" "${connections}" "${rate}" "${accepted}" "${rejected}" \
-    "${deliveries}" "${persisted}" "${ack_p95}" "${broadcast_p95}"
+  printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+    "${profile}" "${status}" "${failure_stage}" "${mode}" "${connections}" "${rate}" "${accepted}" "${rejected}" \
+    "${deliveries}" "${persisted}" "${persistence_check}" "${ack_p95}" "${broadcast_p95}"
 done < <(reports)
 
 echo
@@ -55,26 +65,44 @@ while IFS= read -r report; do
   profile_dir=$(dirname "${report}")
   profile=$(basename "${profile_dir}")
   mode=$(jq -r '.mode' "${report}")
-  publish_p95=$(metric_max "${profile_dir}/metrics/publish_p95.json" 1000)
-  processing_p95=$(metric_max "${profile_dir}/metrics/persistence_processing_p95.json" 1000)
-  persistence_p95=$(metric_max "${profile_dir}/metrics/persistence_lag_p95.json" 1000)
+  if [[ $(jq -r '.started_at // ""' "${report}") == 0001-* ]]; then
+    continue
+  fi
+  measurement_start=$(date -u -d "$(jq -r '.started_at' "${report}")" +%s)
+  measurement_seconds=$(jq -r '.send_duration_seconds | floor' "${report}")
+  steady_start=$((measurement_start + measurement_seconds / 2))
+  measurement_end=$((measurement_start + measurement_seconds))
+  publish_p95=$(metric_max "${profile_dir}/metrics/publish_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  processing_p95=$(metric_max "${profile_dir}/metrics/persistence_processing_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  persistence_p95=$(metric_max "${profile_dir}/metrics/persistence_lag_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
   if [[ "${mode}" == connections ]]; then
     publish_p95=n/a
     processing_p95=n/a
     persistence_p95=n/a
   fi
-  persistence_throughput=$(metric_max "${profile_dir}/metrics/persistence_throughput.json")
-  queue_depth=$(metric_max "${profile_dir}/metrics/persistence_queue_depth.json")
-  database_wait=$(metric_max "${profile_dir}/metrics/database_wait_rate.json" 1 0)
-  publish_failures=$(metric_max "${profile_dir}/metrics/publish_failures.json" 1 0)
-  slow_clients=$(metric_max "${profile_dir}/metrics/slow_client_removals.json" 1 0)
-  cpu=$(metric_max "${profile_dir}/metrics/api_cpu.json")
-  memory=$(metric_max "${profile_dir}/metrics/api_memory.json" 0.00000095367431640625)
-  throttling=$(metric_max "${profile_dir}/metrics/api_cpu_throttling.json" 100)
-  mysql_cpu=$(metric_max "${profile_dir}/metrics/mysql_cpu.json")
-  mysql_memory=$(metric_max "${profile_dir}/metrics/mysql_memory.json" 0.00000095367431640625)
+  persistence_throughput=$(metric_max "${profile_dir}/metrics/persistence_throughput.json" 1 n/a "${steady_start}" "${measurement_end}")
+  queue_depth=$(metric_max "${profile_dir}/metrics/persistence_queue_depth.json" 1 n/a "${steady_start}" "${measurement_end}")
+  database_wait=$(metric_max "${profile_dir}/metrics/database_wait_rate.json" 1 0 "${steady_start}" "${measurement_end}")
+  publish_failures=$(metric_max "${profile_dir}/metrics/publish_failures.json" 1 0 "${steady_start}" "${measurement_end}")
+  slow_clients=$(metric_max "${profile_dir}/metrics/slow_client_removals.json" 1 0 "${steady_start}" "${measurement_end}")
+  cpu=$(metric_max "${profile_dir}/metrics/api_cpu.json" 1 n/a "${steady_start}" "${measurement_end}")
+  memory=$(metric_max "${profile_dir}/metrics/api_memory.json" 0.00000095367431640625 n/a "${steady_start}" "${measurement_end}")
+  throttling=$(metric_max "${profile_dir}/metrics/api_cpu_throttling.json" 100 n/a "${steady_start}" "${measurement_end}")
+  mysql_cpu=$(metric_max "${profile_dir}/metrics/mysql_cpu.json" 1 n/a "${steady_start}" "${measurement_end}")
+  mysql_memory=$(metric_max "${profile_dir}/metrics/mysql_memory.json" 0.00000095367431640625 n/a "${steady_start}" "${measurement_end}")
   printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
     "${profile}" "${publish_p95}" "${processing_p95}" "${persistence_p95}" "${persistence_throughput}" \
     "${queue_depth}" "${database_wait}" "${publish_failures}" "${slow_clients}" "${cpu}" "${memory}" \
     "${throttling}" "${mysql_cpu}" "${mysql_memory}"
+done < <(reports)
+
+echo
+echo "## Failure details"
+echo
+while IFS= read -r report; do
+  jq -r --arg profile "$(basename "$(dirname "${report}")")" '
+    select(.status == "failed") |
+    "- " + $profile + " [" + .failure_stage + "]: " +
+    (.failure_reason | gsub("[\\r\\n]"; " "))
+  ' "${report}"
 done < <(reports)

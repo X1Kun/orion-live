@@ -14,6 +14,7 @@ type WebSocket struct {
 	PingInterval               time.Duration
 	ReadLimitBytes             int64
 	ClientSendQueueCapacity    int
+	ClientReceiveQueueCapacity int
 	RoomBroadcastQueueCapacity int
 	MaxConnections             int
 	MaxConnectionsPerUser      int
@@ -44,6 +45,10 @@ func loadWebSocket() (WebSocket, error) {
 	if err != nil {
 		return WebSocket{}, err
 	}
+	clientReceiveQueueCapacity, err := envInt("WEBSOCKET_CLIENT_RECEIVE_QUEUE_CAPACITY", 16)
+	if err != nil {
+		return WebSocket{}, err
+	}
 	roomBroadcastQueueCapacity, err := envInt("WEBSOCKET_ROOM_BROADCAST_QUEUE_CAPACITY", 256)
 	if err != nil {
 		return WebSocket{}, err
@@ -64,6 +69,7 @@ func loadWebSocket() (WebSocket, error) {
 		PingInterval:               pingInterval,
 		ReadLimitBytes:             int64(readLimitBytes),
 		ClientSendQueueCapacity:    clientSendQueueCapacity,
+		ClientReceiveQueueCapacity: clientReceiveQueueCapacity,
 		RoomBroadcastQueueCapacity: roomBroadcastQueueCapacity,
 		MaxConnections:             maxConnections,
 		MaxConnectionsPerUser:      maxConnectionsPerUser,
@@ -82,6 +88,9 @@ func (c WebSocket) validate() error {
 	}
 	if c.ClientSendQueueCapacity <= 0 {
 		return errors.New("WEBSOCKET_CLIENT_SEND_QUEUE_CAPACITY must be positive")
+	}
+	if c.ClientReceiveQueueCapacity <= 0 {
+		return errors.New("WEBSOCKET_CLIENT_RECEIVE_QUEUE_CAPACITY must be positive")
 	}
 	if c.RoomBroadcastQueueCapacity <= 0 {
 		return errors.New("WEBSOCKET_ROOM_BROADCAST_QUEUE_CAPACITY must be positive")

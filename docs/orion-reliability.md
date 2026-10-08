@@ -197,13 +197,14 @@ one RabbitMQ broker node
 - Realtime delivery is best effort. Each API instance owns a queue for only its locally connected Clients.
 - Realtime queues bind `live_session.ended` and `chat.message.accepted`.
 - The Persistence Queue binds `chat.message.accepted`; `live_session.ended` remains authoritative in the LiveSession table and Outbox.
-- Persistence Consumer replicas compete on the shared durable queue.
+- Persistence Consumer replicas compete on the shared durable queue. Each replica dispatches deliveries to a bounded `PERSISTENCE_CONCURRENCY` worker pool; Prefetch bounds total unacknowledged work and must be at least the worker count.
 - Durable processing messages use persistent delivery mode.
 - Publishers wait for Confirm and enable mandatory routing. The Chat Publisher uses a bounded pool of independent AMQP Channels so publications can wait for confirms concurrently without mixing confirmation or return state; the sequential Outbox Relay keeps one publisher lane.
 - The API send gate opens only after required topology validation succeeds.
 - Connections, channels, QoS, publishers, and Consumers are recreated with exponential backoff and jitter.
 - Orion uses one recovery owner: the application Client recreates connections, while Publisher and Consumer components recreate their channels. The experimental `amqp091-go` automatic Recovery mechanism remains disabled to avoid overlapping recovery state machines.
 - Consumer acknowledgements occur only after processing succeeds or an idempotent duplicate is proven safe.
+- A Worker failure cancels its current Consumer Session, waits for the other in-flight Workers, and only then closes and recreates the AMQP Channel. Acknowledgements use individual delivery tags rather than multi-acknowledgement, so one Worker cannot acknowledge another Worker's unfinished delivery.
 - Retryable failures remain owned by the Persistence Queue and use bounded built-in delayed retry. Deterministic and exhausted failures enter the DLQ.
 - The Persistence Consumer uses RabbitMQ 4.3 Quorum Queue delayed retry. Transient failures use `basic.reject` with requeue enabled; RabbitMQ applies linear backoff and enforces the delivery limit without application-side republishing.
 - Chat content conflicts preserve the first committed message, emit an audit log and metric, and are dead-lettered without consuming the retry budget.
@@ -250,6 +251,8 @@ Client frames use the following initial protocol:
 ```
 
 `message_id` is a UUIDv4. Content preserves the submitted text, must not be blank, and is bounded to 500 Unicode code points. Invalid or unavailable sends receive a rejected `chat.ack`; they do not close an otherwise healthy connection.
+
+Each WebSocket connection has one reader, one sequential Chat processor, and one writer. The reader continues handling Pong frames while Chat processing waits for dependencies. `WEBSOCKET_CLIENT_RECEIVE_QUEUE_CAPACITY` bounds queued application frames (default 16); a full queue closes the connection with code 1013 instead of blocking heartbeat reads. Disconnect cancels processing and discards pending inbound frames. Frames without a confirmed ACK require client reconciliation; queuing is not durable acceptance.
 
 ```text
 WebSocket chat.send with client-generated message_id
