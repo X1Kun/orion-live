@@ -400,7 +400,7 @@ func integrationChatEvent(eventID string) messaging.Event {
 
 func persistenceIntegrationConfig() config.Persistence {
 	return config.Persistence{
-		Prefetch: 8, ProcessingTimeout: time.Second,
+		Prefetch: 8, Concurrency: 4, ProcessingTimeout: time.Second,
 		RetryMinDelay: 200 * time.Millisecond, RetryMaxDelay: 400 * time.Millisecond,
 		DeliveryLimit: 3,
 	}

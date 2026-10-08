@@ -25,7 +25,10 @@ const (
 	reconnectMaxDelay = 5 * time.Second
 )
 
-var ErrConsumerNotReady = errors.New("persistence consumer is not ready")
+var (
+	ErrConsumerNotReady   = errors.New("persistence consumer is not ready")
+	ErrInvalidConcurrency = errors.New("persistence concurrency must be between 1 and 64 and must not exceed prefetch")
+)
 
 type Consumer struct {
 	client     *rabbitclient.Client
@@ -50,6 +53,9 @@ func StartConsumer(
 	repository repository.ChatPersistenceRepository,
 	cfg config.Persistence,
 ) (*Consumer, error) {
+	if cfg.Concurrency < 1 || cfg.Concurrency > 64 || cfg.Concurrency > cfg.Prefetch {
+		return nil, ErrInvalidConcurrency
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	consumer := &Consumer{
 		client: client, repository: repository, config: cfg,

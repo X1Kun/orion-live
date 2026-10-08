@@ -50,6 +50,19 @@ func TestHandleDeliveryClassifiesOutcomes(t *testing.T) {
 	}
 }
 
+func TestStartConsumerRejectsInvalidConcurrencyBeforeOpeningChannel(t *testing.T) {
+	for _, cfg := range []config.Persistence{
+		{Prefetch: 8},
+		{Prefetch: 8, Concurrency: 9},
+		{Prefetch: 128, Concurrency: 65},
+	} {
+		consumer, err := StartConsumer(context.Background(), nil, nil, cfg)
+		if consumer != nil || !errors.Is(err, ErrInvalidConcurrency) {
+			t.Fatalf("StartConsumer(%+v) = (%v, %v), want invalid concurrency", cfg, consumer, err)
+		}
+	}
+}
+
 func TestConsumeSessionUsesConfiguredConcurrency(t *testing.T) {
 	repositoryFake := &blockingChatRepository{
 		entered: make(chan struct{}, 4),
