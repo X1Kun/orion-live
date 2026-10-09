@@ -34,6 +34,11 @@ jobs:
       - name: Compile packages and commands
         run: go build ./...
 
+      - name: Validate load diagnostic scripts
+        run: |
+          bash -n scripts/load/*.sh
+          bash scripts/load/metrics_test.sh
+
       - name: Validate Compose configuration
         env:
           DB_NAME: orion

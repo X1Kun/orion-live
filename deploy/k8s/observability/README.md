@@ -43,6 +43,8 @@ echo
 
 The dashboard covers HTTP traffic and latency, active WebSockets, RabbitMQ Publish Confirm latency, Chat admission, persistence outcomes and lag, SQL pool use, Outbox state, and RabbitMQ queue depth. The RabbitMQ ServiceMonitor keeps the default aggregated endpoint and adds a filtered `/metrics/detailed` scrape for only Orion queue coarse metrics; it does not enable the expensive all-object endpoint. Prometheus rules cover target readiness, publication failures, unavailable admission, failed or stalled Outbox events, and Persistence DLQ depth.
 
+Queue diagnostics panels show per-Pod inbound/outbound wait p95 and local Redis connection-pool statistics. Outbound wait combines ACK and realtime frames. Redis misses are idle-connection misses, while pool timeout counters cover the client's pool wait timer rather than all Admission deadline errors. Use these with Admission latency and logs before tuning Redis pool size.
+
 Delete the optional stack with:
 
 ```bash

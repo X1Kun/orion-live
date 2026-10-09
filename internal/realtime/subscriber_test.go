@@ -34,7 +34,7 @@ func TestHandleBroadcastsAndAcknowledgesEvent(t *testing.T) {
 	select {
 	case body := <-client.Outbound():
 		var event messaging.Event
-		if err := json.Unmarshal(body, &event); err != nil {
+		if err := json.Unmarshal(body.Body, &event); err != nil {
 			t.Fatalf("unmarshal outbound event: %v", err)
 		}
 		if event.EventID != "realtime-event" {

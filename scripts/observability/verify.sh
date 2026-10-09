@@ -38,6 +38,7 @@ verify_query() {
 
 verify_query 'up{namespace="orion-live",service="orion-api"} == 1'
 verify_query 'orion_db_connections'
+verify_query 'orion_redis_pool_size'
 verify_query 'orion_outbox_collection_success == 1'
 verify_query 'rabbitmq_detailed_queue_messages{queue="orion.interaction.persistence"}'
 
@@ -47,6 +48,8 @@ if [[ "${ORION_VERIFY_PIPELINE_METRICS:-false}" == "true" ]]; then
   verify_query 'orion_chat_admission_duration_seconds_count'
   verify_query 'orion_persistence_processing_duration_seconds_count'
   verify_query 'orion_chat_persistence_lag_seconds_count'
+  verify_query 'orion_websocket_queue_wait_seconds_count{direction="inbound"}'
+  verify_query 'orion_websocket_queue_wait_seconds_count{direction="outbound"}'
 fi
 
 grafana_password=$(kubectl -n "${namespace}" get secret orion-monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d)

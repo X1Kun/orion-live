@@ -94,7 +94,7 @@ func (h *WebSocketHandler) Connect(c *gin.Context) {
 	defer metrics.WebSocketConnections.Dec()
 	connectionCtx, cancelConnection := context.WithCancel(c.Request.Context())
 	defer cancelConnection()
-	inbound := make(chan []byte, h.config.ClientReceiveQueueCapacity)
+	inbound := make(chan inboundFrame, h.config.ClientReceiveQueueCapacity)
 	processorDone := make(chan error, 1)
 	go func() {
 		err := h.processPump(connectionCtx, inbound, client, liveSessionID, userID)

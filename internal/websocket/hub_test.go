@@ -282,7 +282,7 @@ func receiveMessage(t *testing.T, client *Client) []byte {
 	t.Helper()
 	select {
 	case message := <-client.Outbound():
-		return message
+		return message.Body
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for message")
 		return nil

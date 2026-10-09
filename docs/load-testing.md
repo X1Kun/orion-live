@@ -69,7 +69,11 @@ After deploying the candidate build, `make kind-capacity` runs the complete capa
 
 ## Measurement boundary
 
-For anomaly diagnosis, run `make kind-capacity CAPACITY_PHASE=diagnostics`. It repeats concurrency-4 rates 25/50 and concurrency-8 rate 40 three times each, retaining profile exit codes, errors, API logs, and Admission metrics. Run `make kind-capacity CAPACITY_PHASE=mixed` for concurrency-8 profiles with 1000 total connections and 20 sending connections: steady 25 msg/s, then 10 msg/s background with a middle 50 msg/s burst lasting 30 seconds. Both commands restore the original concurrency configuration on exit.
+For the short next diagnostic round, run `make kind-capacity CAPACITY_PHASE=focused`. It fixes CPU=1, Publisher=16, Persistence=8 and compares lower-load controls, two 25 msg/s repetitions, and one mixed-recipient profile. See [focused I/O diagnostics](performance/focused-io-diagnostics.md).
+
+The focused stability suite is `make kind-capacity CAPACITY_PHASE=stability`. It captures host/Redis evidence, repeats the safe-load candidate, and compares mixed load under two CPU limits. See [stability diagnostics](performance/stability-diagnostics.md) for interpreting the evidence and configuration restoration.
+
+For anomaly diagnosis, run `make kind-capacity CAPACITY_PHASE=diagnostics`. It repeats concurrency-4 rates 25/50 and concurrency-8 rate 40 three times each, retaining profile exit codes, errors, API logs, and Admission metrics. Run `make kind-capacity CAPACITY_PHASE=mixed` for concurrency-8 profiles with 1000 total connections and 20 sending connections: steady 25 msg/s, hot-room 50 msg/s, then 10 msg/s background with a middle 50 msg/s burst lasting 30 seconds. Both commands restore the original concurrency configuration on exit.
 
 The baseline script resolves the two ready API Pods, opens one Port-forward to each Pod, and assigns WebSocket connections round-robin across the two addresses. It therefore measures an explicit 50/50 two-replica application workload instead of relying on `kubectl port-forward service/...`, which normally selects one backend Pod for the lifetime of the tunnel.
 

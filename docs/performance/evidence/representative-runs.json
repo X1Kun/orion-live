@@ -1,0 +1,369 @@
+{
+  "description": "Representative observations selected from local Kind experiments. Null status/check metadata belongs to legacy reports, not an inferred pass. A dirty harness revision does not uniquely identify the deployed server image. Persisted counts in interrupted profiles are not measurements unless History verification ran.",
+  "records": [
+    {
+      "source": "artifacts/load/20261005T162518Z/throughput-12mps/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "046267dfac00619cc45e13a9c37f6d80640f7c0d",
+        "git_modified": false
+      },
+      "status": null,
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": null,
+      "connections": 20,
+      "senders": null,
+      "rate": 12,
+      "configured_duration": "2m0s",
+      "sent": 1440,
+      "accepted": 1440,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 28800,
+      "expected_deliveries": 28800,
+      "persisted_messages": 1440,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.000774223,
+      "total_duration_seconds": 139.813073025,
+      "ack_latency": {
+        "samples": 1440,
+        "p50_ms": 166.630615,
+        "p95_ms": 305.309835,
+        "p99_ms": 367.026166,
+        "max_ms": 449.60205
+      },
+      "broadcast_latency": {
+        "samples": 28800,
+        "p50_ms": 1.830659,
+        "p95_ms": 26.840519,
+        "p99_ms": 60.886922,
+        "max_ms": 123.896046
+      }
+    },
+    {
+      "source": "artifacts/load/full-20261005T173730Z/throughput-25mps/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "046267dfac00619cc45e13a9c37f6d80640f7c0d",
+        "git_modified": true
+      },
+      "status": null,
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": null,
+      "connections": 20,
+      "senders": null,
+      "rate": 25,
+      "configured_duration": "2m0s",
+      "sent": 3000,
+      "accepted": 3000,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 60000,
+      "expected_deliveries": 60000,
+      "persisted_messages": 3000,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.000491157,
+      "total_duration_seconds": 121.278990009,
+      "ack_latency": {
+        "samples": 3000,
+        "p50_ms": 185.618653,
+        "p95_ms": 326.723032,
+        "p99_ms": 419.362084,
+        "max_ms": 669.202493
+      },
+      "broadcast_latency": {
+        "samples": 60000,
+        "p50_ms": 1.743783,
+        "p95_ms": 20.907522,
+        "p99_ms": 52.74805,
+        "max_ms": 123.247262
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261006T040007Z/persistence-c8/throughput-50mps/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "046267dfac00619cc45e13a9c37f6d80640f7c0d",
+        "git_modified": true
+      },
+      "status": null,
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": null,
+      "connections": 20,
+      "senders": null,
+      "rate": 50,
+      "configured_duration": "2m0s",
+      "sent": 6000,
+      "accepted": 6000,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 120000,
+      "expected_deliveries": 120000,
+      "persisted_messages": 6000,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.00067051,
+      "total_duration_seconds": 121.933052122,
+      "ack_latency": {
+        "samples": 6000,
+        "p50_ms": 179.595858,
+        "p95_ms": 315.448714,
+        "p99_ms": 466.609275,
+        "max_ms": 768.309128
+      },
+      "broadcast_latency": {
+        "samples": 120000,
+        "p50_ms": 1.780867,
+        "p95_ms": 30.980612,
+        "p99_ms": 140.665453,
+        "max_ms": 467.307035
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261006T040007Z/fanout-connections/fanout-1000c-5mps/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "046267dfac00619cc45e13a9c37f6d80640f7c0d",
+        "git_modified": true
+      },
+      "status": null,
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": null,
+      "connections": 1000,
+      "senders": null,
+      "rate": 5,
+      "configured_duration": "2m0s",
+      "sent": 600,
+      "accepted": 600,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 600000,
+      "expected_deliveries": 600000,
+      "persisted_messages": 600,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.000388548,
+      "total_duration_seconds": 120.463282632,
+      "ack_latency": {
+        "samples": 600,
+        "p50_ms": 112.481885,
+        "p95_ms": 221.454321,
+        "p99_ms": 256.957473,
+        "max_ms": 368.032932
+      },
+      "broadcast_latency": {
+        "samples": 600000,
+        "p50_ms": 20.184598,
+        "p95_ms": 51.226917,
+        "p99_ms": 67.781382,
+        "max_ms": 131.543168
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261006T040007Z/idle-connections/connections-2000c/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "046267dfac00619cc45e13a9c37f6d80640f7c0d",
+        "git_modified": true
+      },
+      "status": null,
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": null,
+      "connections": 2000,
+      "senders": null,
+      "rate": 0,
+      "configured_duration": "2m0s",
+      "sent": 0,
+      "accepted": 0,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 0,
+      "expected_deliveries": 0,
+      "persisted_messages": 0,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.000103159,
+      "total_duration_seconds": 120.000103159,
+      "ack_latency": {
+        "samples": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "broadcast_latency": {
+        "samples": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261008T061504Z/mixed-cpu-1/mixed-hotroom/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "01753a2b36790c5091719f26f31d86386f960640",
+        "git_modified": true
+      },
+      "status": "passed",
+      "failure_stage": null,
+      "failure_reason": null,
+      "persistence_check": "complete",
+      "connections": 1000,
+      "senders": 20,
+      "rate": 50,
+      "configured_duration": "2m0s",
+      "sent": 6000,
+      "accepted": 6000,
+      "rejected": 0,
+      "rejections_by_code": null,
+      "realtime_deliveries": 6000000,
+      "expected_deliveries": 6000000,
+      "persisted_messages": 6000,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.440228807,
+      "total_duration_seconds": 122.820910737,
+      "ack_latency": {
+        "samples": 6000,
+        "p50_ms": 274.287117,
+        "p95_ms": 1529.938302,
+        "p99_ms": 2244.688462,
+        "max_ms": 2816.041788
+      },
+      "broadcast_latency": {
+        "samples": 6000000,
+        "p50_ms": 59.828673,
+        "p95_ms": 1261.207178,
+        "p99_ms": 1983.882931,
+        "max_ms": 2595.736447
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261008T061504Z/mixed-cpu-500m/mixed-hotroom/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "01753a2b36790c5091719f26f31d86386f960640",
+        "git_modified": true
+      },
+      "status": "failed",
+      "failure_stage": "send",
+      "failure_reason": "send message 2716: websocket: close sent; first reader error: read client 16: websocket: close 1013: WebSocket inbound queue is full",
+      "persistence_check": "not_checked",
+      "connections": 1000,
+      "senders": 20,
+      "rate": 50,
+      "configured_duration": "2m0s",
+      "sent": 2717,
+      "accepted": 2413,
+      "rejected": 5,
+      "rejections_by_code": {
+        "CHAT_UNAVAILABLE": 5
+      },
+      "realtime_deliveries": 2430992,
+      "expected_deliveries": 2413000,
+      "persisted_messages": 0,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 54.521027917,
+      "total_duration_seconds": 54.52102796,
+      "ack_latency": {
+        "samples": 2418,
+        "p50_ms": 1588.787411,
+        "p95_ms": 5025.2169,
+        "p99_ms": 5401.389668,
+        "max_ms": 6617.312638
+      },
+      "broadcast_latency": {
+        "samples": 2430992,
+        "p50_ms": 1330.908023,
+        "p95_ms": 4822.396014,
+        "p99_ms": 5172.507565,
+        "max_ms": 6515.64483
+      }
+    },
+    {
+      "source": "artifacts/load/capacity-20261009T055014Z/fixed-p16-c8/mixed-25/report.json",
+      "runtime": {
+        "go_version": "go1.25.11",
+        "goos": "linux",
+        "goarch": "amd64",
+        "git_revision": "01753a2b36790c5091719f26f31d86386f960640",
+        "git_modified": true
+      },
+      "status": "failed",
+      "failure_stage": "validation",
+      "failure_reason": "message error rate 0.0033 exceeded maximum 0.0000",
+      "persistence_check": "complete",
+      "connections": 300,
+      "senders": 20,
+      "rate": 25,
+      "configured_duration": "2m0s",
+      "sent": 3000,
+      "accepted": 2990,
+      "rejected": 10,
+      "rejections_by_code": {
+        "CHAT_UNAVAILABLE": 10
+      },
+      "realtime_deliveries": 897000,
+      "expected_deliveries": 897000,
+      "persisted_messages": 2990,
+      "duplicate_acks": 0,
+      "duplicate_deliveries": 0,
+      "rejected_messages_delivered": 0,
+      "rejected_messages_persisted": 0,
+      "send_duration_seconds": 120.00099252,
+      "total_duration_seconds": 120.890164166,
+      "ack_latency": {
+        "samples": 3000,
+        "p50_ms": 290.45487,
+        "p95_ms": 574.438032,
+        "p99_ms": 718.524173,
+        "max_ms": 898.75152
+      },
+      "broadcast_latency": {
+        "samples": 897000,
+        "p50_ms": 8.492938,
+        "p95_ms": 53.106945,
+        "p99_ms": 157.033882,
+        "max_ms": 513.854747
+      }
+    }
+  ]
+}

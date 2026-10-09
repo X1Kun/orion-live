@@ -193,8 +193,8 @@ func TestWebSocketChatAdmissionRejections(t *testing.T) {
 				t.Fatalf("handleClientFrame() error = %v", err)
 			}
 			response := <-client.Outbound()
-			if !strings.Contains(string(response), `"code":"`+tt.code+`"`) {
-				t.Fatalf("unexpected rejection: %s", response)
+			if !strings.Contains(string(response.Body), `"code":"`+tt.code+`"`) {
+				t.Fatalf("unexpected rejection: %s", response.Body)
 			}
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()

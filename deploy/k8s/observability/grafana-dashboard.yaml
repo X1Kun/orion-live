@@ -24,7 +24,11 @@ data:
         {"type":"timeseries","title":"SQL pool connections","gridPos":{"h":8,"w":8,"x":8,"y":16},"targets":[{"expr":"sum by (state) (orion_db_connections)","legendFormat":"{{state}}"}]},
         {"type":"timeseries","title":"Outbox state","gridPos":{"h":8,"w":8,"x":16,"y":16},"targets":[{"expr":"max by (status) (orion_outbox_events)","legendFormat":"{{status}}"}]},
         {"type":"timeseries","title":"RabbitMQ queue depth","gridPos":{"h":8,"w":12,"x":0,"y":24},"targets":[{"expr":"rabbitmq_detailed_queue_messages{queue=~\"orion.*\"}","legendFormat":"{{queue}}"}]},
-        {"type":"timeseries","title":"Outbox oldest unpublished age","gridPos":{"h":8,"w":12,"x":12,"y":24},"targets":[{"expr":"max(orion_outbox_oldest_unpublished_age_seconds)","legendFormat":"seconds"}]}
+        {"type":"timeseries","title":"Outbox oldest unpublished age","gridPos":{"h":8,"w":12,"x":12,"y":24},"targets":[{"expr":"max(orion_outbox_oldest_unpublished_age_seconds)","legendFormat":"seconds"}]},
+        {"type":"timeseries","title":"WebSocket queue wait p95","gridPos":{"h":8,"w":12,"x":0,"y":32},"fieldConfig":{"defaults":{"unit":"s"}},"targets":[{"expr":"histogram_quantile(0.95, sum by (le,pod,direction) (rate(orion_websocket_queue_wait_seconds_bucket[1m])))","legendFormat":"{{pod}} {{direction}}"}]},
+        {"type":"timeseries","title":"Redis client pool connections","gridPos":{"h":8,"w":12,"x":12,"y":32},"targets":[{"expr":"orion_redis_pool_connections","legendFormat":"{{pod}} {{state}}"},{"expr":"orion_redis_pool_size","legendFormat":"{{pod}} limit"}]},
+        {"type":"timeseries","title":"Redis pool wait timeouts per second","gridPos":{"h":8,"w":12,"x":0,"y":40},"targets":[{"expr":"rate(orion_redis_pool_timeouts_total[1m])","legendFormat":"{{pod}}"}]},
+        {"type":"timeseries","title":"Redis pool acquisitions per second","gridPos":{"h":8,"w":12,"x":12,"y":40},"targets":[{"expr":"rate(orion_redis_pool_hits_total[1m])","legendFormat":"{{pod}} idle hit"},{"expr":"rate(orion_redis_pool_misses_total[1m])","legendFormat":"{{pod}} idle miss"}]}
       ],
       "refresh": "10s",
       "schemaVersion": 39,
