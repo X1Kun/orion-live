@@ -31,11 +31,39 @@ The repository is being rebuilt from its original video-oriented prototype. The 
 - A minimal Docker Compose development environment
 - CI gates for formatting, static analysis, compilation, image construction, Compose/Kustomize validation, secrets, Kind Smoke on pull requests, and full Kind Resilience on main and schedule
 
-Measured load evidence and evidence-driven optimization will be added next. Reaction aggregation or Gift-effect credits may be added later as one optional extension. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), the optional monitoring stack in [deploy/k8s/observability/README.md](deploy/k8s/observability/README.md), and target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
+Load experiments and operational diagnostics now cover throughput, hot-room fan-out, idle connections, mixed traffic, bursts, and CPU/Publisher-concurrency comparisons. The verified three-node Kind release and resilience workflow is documented in [deploy/k8s/README.md](deploy/k8s/README.md), the monitoring stack in [deploy/k8s/observability/README.md](deploy/k8s/observability/README.md), and target behavior in [docs/orion-reliability.md](docs/orion-reliability.md).
 
 The load harness and its correctness guarantees are documented in [docs/load-testing.md](docs/load-testing.md). The smoke profile validates the harness; measured capacity evidence is intentionally recorded separately.
 
 The repeatable post-optimization profiles and curated results are documented in [docs/performance/chat-baseline.md](docs/performance/chat-baseline.md).
+
+## Test results
+
+Tests run on an i7-9750H laptop (6 cores / 12 threads, approximately 32 GiB RAM), using three Kind nodes, two API Pods, and single-node MySQL, Redis, and RabbitMQ. Connections are assigned evenly through two direct Pod port-forwards. These observations include local storage and tunnel overhead; they establish tested workloads, not production or maximum capacity.
+
+| Workload | Observed result | Interpretation |
+| --- | --- | --- |
+| Chat throughput: 25 msg/s, 20 connections, 2 minutes | 3,000 accepted and persisted; 60,000 realtime deliveries; ACK p95 327 ms | Representative successful run with 4 Persistence Workers per Pod |
+| Chat throughput: 50 msg/s, 20 connections, 2 minutes | 6,000 accepted and persisted; 120,000 realtime deliveries; ACK p95 315 ms | Representative successful run with 8 Persistence Workers per Pod; later runs exposed variability |
+| Hot-room fan-out: 1,000 connections, 5 msg/s, 2 minutes | 600 messages persisted; 600,000 realtime deliveries; broadcast p95 51 ms | Counts matched without rejected messages |
+| Idle connection hold: 2,000 connections, 2 minutes | All connections held for the test duration | Reaches the configured two-Pod admission ceiling; does not measure active-traffic capacity |
+| Mixed hot room: 1,000 connections, 20 senders, 50 msg/s, 2 minutes | 6,000 persisted and 6,000,000 realtime deliveries at 1 CPU per Pod | Correctness completed, but ACK/broadcast p95 of 1.53/1.26 s exceeded the proposed latency targets |
+
+Tests also retained failures: 500m CPU per Pod produced heavy throttling and inbound-overload closure in hot-room traffic; repeated runs observed Redis Admission timeouts and shared-disk latency spikes. Sustained 25 msg/s mixed traffic is not yet consistently within the zero-rejection and latency objectives. A successful count check alone is not a performance SLO pass.
+
+[Curated report snapshots](docs/performance/evidence/representative-runs.json) preserve source run IDs, measured values, and harness revision metadata. [Performance findings](docs/performance/chat-baseline.md) and [latency investigation](docs/performance/latency-investigation.md) explain selection, failures, and remaining uncertainty. Raw local artifacts are ignored by Git.
+
+## Optimizations driven by test evidence
+
+| Evidence | Implemented change | Validation and tradeoff |
+| --- | --- | --- |
+| Serialized publishing held a mutex while waiting for Confirm | Bounded independent Publisher Channels, one in-flight publication per lane; Outbox remains sequential | Retested the previously failing 5 msg/s workload with complete ACK/broadcast/persistence counts. More lanes consume resources and cannot remove broker or disk delays |
+| Sequential Persistence Consumers plateaued near 10 msg/s | Configurable bounded Workers per Consumer with individual Ack/Reject and Session cancellation | Four Workers per Pod reached approximately 26 msg/s in one experiment; eight completed a 50 msg/s run. Higher concurrency increases database work; gains are not linear or guaranteed |
+| Slow Chat processing prevented timely Pong reads in a controlled reproduction | Separate WebSocket reader and ordered processor, connected by a bounded inbound queue | Race-tested heartbeat continuity, message order, overflow cancellation, and shutdown. A later load run observed explicit 1013 overload instead of silently growing the queue |
+| Client-visible latency could not be explained by aggregate CPU alone | Inbound/outbound wait histograms, Publisher lane timing, Redis pool metrics, per-Pod CPU, and host I/O sampling | Localized rejection events to Admission timeouts and correlated some with disk stalls. Shared-I/O causality and latency stability remain open |
+| Failed setup and metric requests produced misleading or missing summaries | Explicit failure stages and History-check state; isolated, retried metric collection | Regression checks cover failed HTTP/JSON collection. Unverified persistence is shown as n/a, not zero writes |
+
+The resulting engineering loop is reproducible: define a workload, check message correctness, correlate latency with dependency/resource metrics, change one constraint, and compare matched runs. Remaining multi-room, concurrent-History, and traffic-under-failure scenarios are follow-up work; existing Kind resilience E2E is a separate functional check.
 
 ## Local development
 

@@ -13,11 +13,13 @@ fanout_rate=${ORION_FANOUT_RATE:-1}
 fanout_rates=${ORION_FANOUT_RATES:-${fanout_rate}}
 output_root=${ORION_LOAD_OUTPUT_DIR:-${project_root}/artifacts/load/$(date -u +%Y%m%dT%H%M%SZ)}
 failed_profiles=()
+failed_collections=()
+source "${project_root}/scripts/load/metrics.sh"
 
 case "${phase}" in
-  all|throughput|fanout|connections|mixed) ;;
+  all|throughput|fanout|connections|mixed|publisher|focused) ;;
   *)
-    echo "usage: $0 [all|throughput|fanout|connections]" >&2
+    echo "usage: $0 [all|throughput|fanout|connections|mixed|publisher|focused]" >&2
     exit 1
     ;;
 esac
@@ -35,13 +37,39 @@ work_dir=$(mktemp -d)
 api_a_forward_pid=
 api_b_forward_pid=
 prometheus_forward_pid=
+sampler_pids=()
 cleanup() {
+  for pid in "${sampler_pids[@]}"; do
+    kill "${pid}" >/dev/null 2>&1 || true
+  done
   [[ -z "${api_a_forward_pid}" ]] || kill "${api_a_forward_pid}" >/dev/null 2>&1 || true
   [[ -z "${api_b_forward_pid}" ]] || kill "${api_b_forward_pid}" >/dev/null 2>&1 || true
   [[ -z "${prometheus_forward_pid}" ]] || kill "${prometheus_forward_pid}" >/dev/null 2>&1 || true
   rm -rf "${work_dir}"
 }
 trap cleanup EXIT
+
+if [[ "${ORION_LOAD_DIAGNOSTICS:-false}" == true ]]; then
+  mkdir -p "${output_root}/diagnostics"
+  date -u +%Y-%m-%dT%H:%M:%SZ >"${output_root}/diagnostics/started-at.txt"
+  if command -v vmstat >/dev/null; then
+    TZ=UTC vmstat -t 1 >"${output_root}/diagnostics/vmstat.txt" 2>&1 &
+    sampler_pids+=("$!")
+  fi
+  if command -v iostat >/dev/null; then
+    TZ=UTC iostat -xz -t 1 >"${output_root}/diagnostics/iostat.txt" 2>&1 &
+    sampler_pids+=("$!")
+  else
+    echo "iostat unavailable; disk latency capture requires sysstat" >"${output_root}/diagnostics/iostat-unavailable.txt"
+  fi
+  if command -v pidstat >/dev/null; then
+    TZ=UTC pidstat -d -r -u -h -p ALL 1 >"${output_root}/diagnostics/pidstat.txt" 2>&1 &
+    sampler_pids+=("$!")
+  else
+    echo "pidstat unavailable; process I/O attribution requires sysstat" >"${output_root}/diagnostics/pidstat-unavailable.txt"
+  fi
+  ps -eo pid,ppid,comm >"${output_root}/diagnostics/processes-before.txt"
+fi
 
 mapfile -t api_pods < <(
   kubectl -n "${namespace}" get pods \
@@ -82,8 +110,8 @@ wait_for_query() {
   local query=$1
   local response=""
   for _ in $(seq 1 60); do
-    response=$(curl --fail --silent --get --data-urlencode "query=${query}" http://127.0.0.1:19090/api/v1/query)
-    if ! grep -q '"result":\[\]' <<<"${response}"; then
+    response=$(curl --fail --silent --max-time 5 --get --data-urlencode "query=${query}" http://127.0.0.1:19090/api/v1/query) || response=''
+    if jq -e '.status == "success" and (.data.result | length > 0)' <<<"${response}" >/dev/null; then
       return
     fi
     sleep 1
@@ -96,8 +124,8 @@ wait_for_empty_persistence_queue() {
   local query='rabbitmq_detailed_queue_messages{queue="orion.interaction.persistence"} == 0'
   local response=""
   for _ in $(seq 1 300); do
-    response=$(curl --fail --silent --get --data-urlencode "query=${query}" http://127.0.0.1:19090/api/v1/query)
-    if ! grep -q '"result":\[\]' <<<"${response}"; then
+    response=$(curl --fail --silent --max-time 5 --get --data-urlencode "query=${query}" http://127.0.0.1:19090/api/v1/query) || response=''
+    if jq -e '.status == "success" and (.data.result | length > 0) and all(.data.result[]; .value[1] == "0")' <<<"${response}" >/dev/null; then
       return
     fi
     sleep 1
@@ -149,6 +177,20 @@ metric_names=(
   admission_p95
   publisher_acquire_p95
   frame_processing_p95
+  api_cpu_by_pod
+  api_throttling_by_pod
+  admission_by_pod
+  publisher_acquire_by_pod
+  publish_by_pod
+  frame_processing_by_pod
+  node_io_wait
+  scrape_targets
+  inbound_wait_p95
+  outbound_wait_p95
+  redis_pool_connections
+  redis_pool_size
+  redis_pool_timeouts
+  redis_pool_misses
 )
 metric_queries=(
   'histogram_quantile(0.95, sum by (le) (rate(orion_rabbitmq_publish_duration_seconds_bucket{event_type="chat.message.accepted"}[1m])))'
@@ -169,26 +211,40 @@ metric_queries=(
   'histogram_quantile(0.95, sum by (le) (rate(orion_chat_admission_duration_seconds_bucket[1m])))'
   'histogram_quantile(0.95, sum by (le) (rate(orion_rabbitmq_publish_acquire_duration_seconds_bucket[1m])))'
   'histogram_quantile(0.95, sum by (le) (rate(orion_websocket_frame_processing_duration_seconds_bucket[1m])))'
+  'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="orion-live",pod=~"orion-api-.*",container="api"}[1m]))'
+  'sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace="orion-live",pod=~"orion-api-.*",container="api"}[1m])) / clamp_min(sum by (pod) (rate(container_cpu_cfs_periods_total{namespace="orion-live",pod=~"orion-api-.*",container="api"}[1m])), 0.001)'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_chat_admission_duration_seconds_bucket[1m])))'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_rabbitmq_publish_acquire_duration_seconds_bucket[1m])))'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_rabbitmq_publish_duration_seconds_bucket{event_type="chat.message.accepted"}[1m])))'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_websocket_frame_processing_duration_seconds_bucket[1m])))'
+  'avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[1m]))'
+  'up{namespace="orion-live"}'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_websocket_queue_wait_seconds_bucket{direction="inbound"}[1m])))'
+  'histogram_quantile(0.95, sum by (le,pod) (rate(orion_websocket_queue_wait_seconds_bucket{direction="outbound"}[1m])))'
+  'orion_redis_pool_connections'
+  'orion_redis_pool_size'
+  'increase(orion_redis_pool_timeouts_total[1m])'
+  'rate(orion_redis_pool_misses_total[1m])'
 )
-
-capture_metrics() {
-  local profile_dir=$1
-  local start=$2
-  local end=$3
-  mkdir -p "${profile_dir}/metrics"
-  for index in "${!metric_names[@]}"; do
-    curl --fail --silent --get \
-      --data-urlencode "query=${metric_queries[index]}" \
-      --data-urlencode "start=${start}" \
-      --data-urlencode "end=${end}" \
-      --data-urlencode "step=5" \
-      http://127.0.0.1:19090/api/v1/query_range \
-      >"${profile_dir}/metrics/${metric_names[index]}.json"
-  done
-}
 
 write_summary() {
   "${project_root}/scripts/load/summarize.sh" "${output_root}" >"${output_root}/summary.md"
+}
+
+capture_redis() {
+  local destination=$1
+  [[ "${ORION_LOAD_DIAGNOSTICS:-false}" == true ]] || return 0
+  {
+    date -u +%Y-%m-%dT%H:%M:%SZ
+    kubectl -n "${namespace}" exec redis-0 -- sh -c '
+      export REDISCLI_AUTH="$REDIS_PASSWORD"
+      for section in stats clients commandstats persistence cpu; do
+        redis-cli --no-auth-warning INFO "$section"
+      done
+      redis-cli --no-auth-warning SLOWLOG GET 20
+      redis-cli --no-auth-warning LATENCY LATEST
+    '
+  } >"${destination}" 2>&1 || true
 }
 
 run_profile() {
@@ -200,21 +256,27 @@ run_profile() {
   local end
   local status=0
   wait_for_empty_persistence_queue
+  capture_redis "${profile_dir}/redis-before.txt"
   log_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  start=$(date -u +%s)
   echo "running ${name}"
   "${binary}" "${common_args[@]}" -output "${profile_dir}/report.json" "$@" >"${profile_dir}/stdout.json" 2>"${profile_dir}/error.txt" || status=$?
   printf '%s\n' "${status}" >"${profile_dir}/exit-code.txt"
   for pod in "${api_pods[@]}"; do
     kubectl -n "${namespace}" logs "${pod}" --timestamps --since-time="${log_start}" >"${profile_dir}/${pod}.log" 2>&1 || true
   done
-  if [[ -s "${profile_dir}/report.json" ]]; then
+  if [[ -s "${profile_dir}/report.json" ]] && jq -e '.started_at != "0001-01-01T00:00:00Z" and (.started_at != null)' "${profile_dir}/report.json" >/dev/null; then
     start=$(date -u -d "$(jq -r '.started_at' "${profile_dir}/report.json")" +%s)
-  else
-    start=$(date -u +%s)
   fi
   sleep "${scrape_lag}"
+  capture_redis "${profile_dir}/redis-after.txt"
   end=$(date -u +%s)
-  capture_metrics "${profile_dir}" "${start}" "${end}"
+  if ! capture_metrics "${profile_dir}" "${start}" "${end}"; then
+    failed_collections+=("${name}")
+  fi
+  kubectl -n "${namespace}" get pods -o wide >"${profile_dir}/pods-after.txt" 2>&1 || true
+  kubectl -n "${namespace}" get events --sort-by=.lastTimestamp >"${profile_dir}/events-after.txt" 2>&1 || true
+  write_summary
   if (( status != 0 )); then
     write_summary
     cat "${output_root}/summary.md"
@@ -245,8 +307,23 @@ if [[ "${phase}" == all || "${phase}" == throughput ]]; then
 fi
 
 if [[ "${phase}" == mixed ]]; then
-  run_profile mixed-steady -connections 1000 -senders 20 -message-rate 25 -duration 2m -drain-timeout 1m -history-timeout 1m
+  run_profile mixed-steady -connections 1000 -senders 20 -message-rate 25 -duration "${ORION_MIXED_STEADY_DURATION:-2m}" -drain-timeout 1m -history-timeout 1m
+  run_profile mixed-hotroom -connections 1000 -senders 20 -message-rate 50 -duration "${ORION_MIXED_HOTROOM_DURATION:-2m}" -drain-timeout 1m -history-timeout 1m
   run_profile mixed-burst -connections 1000 -senders 20 -message-rate 10 -duration 2m -burst-rate 50 -burst-duration 30s -drain-timeout 1m -history-timeout 1m
+fi
+
+if [[ "${phase}" == publisher ]]; then
+  run_profile publisher-light -connections 20 -senders 20 -message-rate 25 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile publisher-mixed -connections 1000 -senders 20 -message-rate 50 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile publisher-many-senders -connections 1000 -senders 128 -message-rate 80 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+fi
+
+if [[ "${phase}" == focused ]]; then
+  run_profile control-before -connections 20 -senders 20 -message-rate 10 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile chat-25-run1 -connections 20 -senders 20 -message-rate 25 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile mixed-25 -connections "${ORION_FOCUSED_AUDIENCE:-300}" -senders 20 -message-rate 25 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile chat-25-run2 -connections 20 -senders 20 -message-rate 25 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
+  run_profile control-after -connections 20 -senders 20 -message-rate 10 -duration "${duration}" -drain-timeout 1m -history-timeout 1m
 fi
 
 if [[ "${phase}" == all || "${phase}" == fanout ]]; then
@@ -268,5 +345,9 @@ cat "${output_root}/summary.md"
 echo "baseline artifacts: ${output_root}"
 if (( ${#failed_profiles[@]} > 0 )); then
   echo "failed profiles: ${failed_profiles[*]}" >&2
+  exit 1
+fi
+if (( ${#failed_collections[@]} > 0 )); then
+  echo "profiles with incomplete metrics: ${failed_collections[*]}" >&2
   exit 1
 fi

@@ -111,6 +111,12 @@ var (
 		Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 	})
 
+	WebSocketQueueWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "orion_websocket_queue_wait_seconds",
+		Help:    "Wait from successful queue admission until dequeue; outbound includes ACKs and realtime frames. Excludes socket write duration and discarded frames.",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	}, []string{"direction"})
+
 	PersistenceProcessingDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "orion_persistence_processing_duration_seconds",

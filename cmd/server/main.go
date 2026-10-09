@@ -59,6 +59,7 @@ func main() {
 		logger.Log.WithError(err).Fatal("initialize redis")
 	}
 	defer redis.Close()
+	metrics.RegisterRedisCollector(redis)
 
 	rabbitMQ, err := rabbitclient.Open(startupCtx, cfg.RabbitMQ)
 	if err != nil {

@@ -3,6 +3,7 @@ package websocket
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 var (
@@ -15,9 +16,15 @@ var (
 type Client struct {
 	mu         sync.Mutex
 	joined     bool
-	outboundCh chan []byte
+	outboundCh chan OutboundMessage
 	done       chan struct{}
 	closed     bool
+}
+
+// OutboundMessage carries the enqueue timestamp without changing the wire body.
+type OutboundMessage struct {
+	Body       []byte
+	EnqueuedAt time.Time
 }
 
 func (c *Client) claimRoom() error {
@@ -46,13 +53,13 @@ func NewClient(sendQueueCapacity int) (*Client, error) {
 		return nil, ErrInvalidClientQueueCapacity
 	}
 	return &Client{
-		outboundCh: make(chan []byte, sendQueueCapacity),
+		outboundCh: make(chan OutboundMessage, sendQueueCapacity),
 		done:       make(chan struct{}),
 	}, nil
 }
 
 // Outbound returns the queue consumed by the future WebSocket writer.
-func (c *Client) Outbound() <-chan []byte {
+func (c *Client) Outbound() <-chan OutboundMessage {
 	return c.outboundCh
 }
 
@@ -71,7 +78,7 @@ func (c *Client) EnqueueOutbound(message []byte) bool {
 
 	copyOfMessage := append([]byte(nil), message...)
 	select {
-	case c.outboundCh <- copyOfMessage:
+	case c.outboundCh <- OutboundMessage{Body: copyOfMessage, EnqueuedAt: time.Now()}:
 		return true
 	default:
 		return false

@@ -15,7 +15,12 @@ var (
 	errWebSocketInboundQueueFull       = errors.New("WebSocket inbound queue is full")
 )
 
-func (h *WebSocketHandler) readPump(connection *gorilla.Conn, inbound chan<- []byte) error {
+type inboundFrame struct {
+	body       []byte
+	enqueuedAt time.Time
+}
+
+func (h *WebSocketHandler) readPump(connection *gorilla.Conn, inbound chan<- inboundFrame) error {
 	defer close(inbound)
 	connection.SetReadLimit(h.config.ReadLimitBytes)
 	if err := connection.SetReadDeadline(time.Now().Add(h.config.PongTimeout)); err != nil {
@@ -34,14 +39,14 @@ func (h *WebSocketHandler) readPump(connection *gorilla.Conn, inbound chan<- []b
 			return errWebSocketMessageTypeUnsupported
 		}
 		select {
-		case inbound <- body:
+		case inbound <- inboundFrame{body: body, enqueuedAt: time.Now()}:
 		default:
 			return errWebSocketInboundQueueFull
 		}
 	}
 }
 
-func (h *WebSocketHandler) processPump(ctx context.Context, inbound <-chan []byte, client *roomhub.Client, liveSessionID, userID uint64) error {
+func (h *WebSocketHandler) processPump(ctx context.Context, inbound <-chan inboundFrame, client *roomhub.Client, liveSessionID, userID uint64) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -49,7 +54,7 @@ func (h *WebSocketHandler) processPump(ctx context.Context, inbound <-chan []byt
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case body, ok := <-inbound:
+		case frame, ok := <-inbound:
 			if !ok {
 				return nil
 			}
@@ -57,7 +62,8 @@ func (h *WebSocketHandler) processPump(ctx context.Context, inbound <-chan []byt
 				return err
 			}
 			started := time.Now()
-			err := h.handleClientFrame(ctx, client, liveSessionID, userID, body)
+			metrics.WebSocketQueueWait.WithLabelValues("inbound").Observe(started.Sub(frame.enqueuedAt).Seconds())
+			err := h.handleClientFrame(ctx, client, liveSessionID, userID, frame.body)
 			metrics.WebSocketFrameProcessingDuration.Observe(time.Since(started).Seconds())
 			if err != nil {
 				return err
@@ -73,10 +79,11 @@ func (h *WebSocketHandler) writePump(connection *gorilla.Conn, client *roomhub.C
 	for {
 		select {
 		case message := <-client.Outbound():
+			metrics.WebSocketQueueWait.WithLabelValues("outbound").Observe(time.Since(message.EnqueuedAt).Seconds())
 			if err := connection.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout)); err != nil {
 				return err
 			}
-			if err := connection.WriteMessage(gorilla.TextMessage, message); err != nil {
+			if err := connection.WriteMessage(gorilla.TextMessage, message.Body); err != nil {
 				return err
 			}
 		case <-pingTicker.C:

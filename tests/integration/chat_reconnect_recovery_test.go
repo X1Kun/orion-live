@@ -65,7 +65,7 @@ func TestChatReconnectRecoveryMergesRealtimeAndHistory(t *testing.T) {
 	var realtimeEvent messaging.Event
 	select {
 	case body := <-client.Outbound():
-		if err := json.Unmarshal(body, &realtimeEvent); err != nil {
+		if err := json.Unmarshal(body.Body, &realtimeEvent); err != nil {
 			t.Fatalf("decode realtime event: %v", err)
 		}
 	case <-time.After(5 * time.Second):

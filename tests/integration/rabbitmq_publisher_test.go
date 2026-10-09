@@ -337,7 +337,7 @@ func assertRealtimeEvent(t *testing.T, client *roomhub.Client, wantEventID strin
 	select {
 	case body := <-client.Outbound():
 		var event messaging.Event
-		if err := json.Unmarshal(body, &event); err != nil {
+		if err := json.Unmarshal(body.Body, &event); err != nil {
 			t.Fatalf("unmarshal realtime event: %v", err)
 		}
 		if event.EventID != wantEventID {
@@ -373,7 +373,7 @@ func assertRealtimeEventuallyRecovers(
 		select {
 		case body := <-client.Outbound():
 			var delivered messaging.Event
-			if err := json.Unmarshal(body, &delivered); err != nil {
+			if err := json.Unmarshal(body.Body, &delivered); err != nil {
 				t.Fatalf("unmarshal recovered realtime event: %v", err)
 			}
 			if delivered.EventID != event.EventID {

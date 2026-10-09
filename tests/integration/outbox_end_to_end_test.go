@@ -128,7 +128,7 @@ func TestLiveSessionEndedOutboxEndToEnd(t *testing.T) {
 	select {
 	case body := <-roomClient.Outbound():
 		var event messaging.Event
-		if err := json.Unmarshal(body, &event); err != nil {
+		if err := json.Unmarshal(body.Body, &event); err != nil {
 			t.Fatalf("decode event: %v", err)
 		}
 		if event.EventType != messaging.EventTypeLiveSessionEnded {

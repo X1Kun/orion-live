@@ -10,7 +10,7 @@ metric_max() {
   local empty_value=${3:-n/a}
   local window_start=${4:-0}
   local window_end=${5:-9999999999}
-  if [[ ! -s "${file}" ]]; then
+  if [[ ! -s "${file}" ]] || ! jq -e '.status == "success" and (.data.result | type == "array")' "${file}" >/dev/null 2>&1; then
     echo "${empty_value}"
     return
   fi
@@ -26,6 +26,20 @@ reports() {
 }
 
 echo "# Load baseline summary"
+echo
+echo "## Metric collection"
+echo
+echo "| Profile | Collection | Failed queries | Empty series |"
+echo "| --- | --- | --- | --- |"
+while IFS= read -r report; do
+  profile_dir=$(dirname "${report}")
+  if [[ -s "${profile_dir}/metrics-collection.json" ]]; then
+    jq -r --arg profile "$(basename "${profile_dir}")" \
+      '"| " + $profile + " | " + .status + " | " + (.failed_queries|join(", ")) + " | " + (.empty_series|join(", ")) + " |"' "${profile_dir}/metrics-collection.json"
+  else
+    printf '| %s | unknown (legacy) | — | — |\n' "$(basename "${profile_dir}")"
+  fi
+done < <(reports)
 echo
 echo "## Client-observed results"
 echo
@@ -94,6 +108,28 @@ while IFS= read -r report; do
     "${profile}" "${publish_p95}" "${processing_p95}" "${persistence_p95}" "${persistence_throughput}" \
     "${queue_depth}" "${database_wait}" "${publish_failures}" "${slow_clients}" "${cpu}" "${memory}" \
     "${throttling}" "${mysql_cpu}" "${mysql_memory}"
+done < <(reports)
+
+echo
+echo "## Pipeline diagnosis (rolling p95 peaks, ms)"
+echo
+echo "| Profile | Inbound wait | Admission | Publisher lane wait | Frame processing | Outbound wait | Redis pool timeout increase (1m max) |"
+echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"
+while IFS= read -r report; do
+  profile_dir=$(dirname "${report}")
+  started=$(jq -r '.started_at' "${report}")
+  [[ "${started}" != 0001-* ]] || continue
+  measurement_start=$(date -u -d "${started}" +%s)
+  measurement_seconds=$(jq -r '.send_duration_seconds | floor' "${report}")
+  steady_start=$((measurement_start + measurement_seconds / 2))
+  measurement_end=$((measurement_start + measurement_seconds))
+  admission=$(metric_max "${profile_dir}/metrics/admission_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  acquire=$(metric_max "${profile_dir}/metrics/publisher_acquire_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  processing=$(metric_max "${profile_dir}/metrics/frame_processing_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  inbound_wait=$(metric_max "${profile_dir}/metrics/inbound_wait_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  outbound_wait=$(metric_max "${profile_dir}/metrics/outbound_wait_p95.json" 1000 n/a "${steady_start}" "${measurement_end}")
+  redis_timeouts=$(metric_max "${profile_dir}/metrics/redis_pool_timeouts.json" 1 n/a "${steady_start}" "${measurement_end}")
+  printf '| %s | %s | %s | %s | %s | %s | %s |\n' "$(basename "${profile_dir}")" "${inbound_wait}" "${admission}" "${acquire}" "${processing}" "${outbound_wait}" "${redis_timeouts}"
 done < <(reports)
 
 echo

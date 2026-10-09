@@ -6,9 +6,18 @@ cluster_name=${ORION_KIND_CLUSTER:-orion-live}
 namespace=orion-live
 output_root=${ORION_CAPACITY_OUTPUT_DIR:-${project_root}/artifacts/load/capacity-$(date -u +%Y%m%dT%H%M%SZ)}
 failed_suites=()
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
+case "${1:-}" in
+  ''|diagnostics|mixed|stability|publisher|focused) ;;
+  *) echo "usage: $0 [diagnostics|mixed|stability|publisher|focused]" >&2; exit 1 ;;
+esac
 
 kubectl config use-context "kind-${cluster_name}" >/dev/null
 original_concurrency=$(kubectl -n "${namespace}" get configmap orion-runtime-config -o jsonpath='{.data.PERSISTENCE_CONCURRENCY}')
+original_publish_concurrency=$(kubectl -n "${namespace}" get configmap orion-runtime-config -o jsonpath='{.data.RABBITMQ_CHAT_PUBLISH_CONCURRENCY}')
+original_resources=$(kubectl -n "${namespace}" get deployment orion-api -o json | jq -c '.spec.template.spec.containers[] | select(.name == "api") | .resources')
+cpu_changed=false
+publisher_changed=false
 
 set_concurrency() {
   local concurrency=$1
@@ -20,6 +29,19 @@ set_concurrency() {
 
 restore_concurrency() {
   set +e
+  if [[ "${publisher_changed}" == true ]]; then
+    if [[ -n "${original_publish_concurrency}" ]]; then
+      kubectl -n "${namespace}" patch configmap orion-runtime-config --type merge \
+        -p "{\"data\":{\"RABBITMQ_CHAT_PUBLISH_CONCURRENCY\":\"${original_publish_concurrency}\"}}" >/dev/null
+    else
+      kubectl -n "${namespace}" patch configmap orion-runtime-config --type merge \
+        -p '{"data":{"RABBITMQ_CHAT_PUBLISH_CONCURRENCY":null}}' >/dev/null
+    fi
+  fi
+  if [[ "${cpu_changed}" == true ]]; then
+    kubectl -n "${namespace}" patch deployment orion-api --type strategic \
+      -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"api\",\"resources\":${original_resources}}]}}}}" >/dev/null
+  fi
   set_concurrency "${original_concurrency}"
 }
 trap restore_concurrency EXIT
@@ -46,6 +68,82 @@ run_suite() {
 }
 
 mkdir -p "${output_root}"
+
+if [[ "${1:-}" == focused ]]; then
+  cpu_changed=true
+  publisher_changed=true
+  kubectl -n "${namespace}" patch configmap orion-runtime-config --type merge \
+    -p '{"data":{"RABBITMQ_CHAT_PUBLISH_CONCURRENCY":"16","PERSISTENCE_CONCURRENCY":"8"}}' >/dev/null
+  kubectl -n "${namespace}" set resources deployment/orion-api -c api --limits=cpu=1 >/dev/null
+  kubectl -n "${namespace}" rollout restart deployment/orion-api >/dev/null
+  kubectl -n "${namespace}" rollout status deployment/orion-api --timeout=5m
+  run_suite fixed-p16-c8 focused ORION_LOAD_DIAGNOSTICS=true \
+    ORION_LOAD_DURATION="${ORION_FOCUSED_DURATION:-2m}" \
+    ORION_FOCUSED_AUDIENCE="${ORION_FOCUSED_AUDIENCE:-300}"
+  echo "focused artifacts: ${output_root}"
+  if (( ${#failed_suites[@]} > 0 )); then
+    echo "failed suites: ${failed_suites[*]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == publisher ]]; then
+  read -r -a candidates <<<"${ORION_PUBLISHER_CONCURRENCIES:-8 16 32 64}"
+  repetitions=${ORION_PUBLISHER_REPEATS:-3}
+  if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ || ${#candidates[@]} -eq 0 ]]; then
+    echo "publisher repeats must be a positive integer and candidates must be nonempty" >&2
+    exit 1
+  fi
+  for candidate in "${candidates[@]}"; do
+    if [[ ! "${candidate}" =~ ^[1-9][0-9]*$ ]] || (( candidate > 64 )); then
+      echo "Publisher concurrency must be between 1 and 64" >&2
+      exit 1
+    fi
+  done
+  cpu_changed=true
+  kubectl -n "${namespace}" set resources deployment/orion-api -c api --limits=cpu=1 >/dev/null
+  set_concurrency 8
+  for ((round=1; round<=repetitions; round++)); do
+    for ((offset=0; offset<${#candidates[@]}; offset++)); do
+      index=${offset}
+      if (( round % 2 == 0 )); then index=$((${#candidates[@]} - 1 - offset)); fi
+      candidate=${candidates[index]}
+      publisher_changed=true
+      kubectl -n "${namespace}" patch configmap orion-runtime-config --type merge \
+        -p "{\"data\":{\"RABBITMQ_CHAT_PUBLISH_CONCURRENCY\":\"${candidate}\"}}" >/dev/null
+      kubectl -n "${namespace}" rollout restart deployment/orion-api >/dev/null
+      kubectl -n "${namespace}" rollout status deployment/orion-api --timeout=5m
+      run_suite "publisher-${candidate}-run${round}" publisher \
+        ORION_LOAD_DIAGNOSTICS=true ORION_LOAD_DURATION="${ORION_PUBLISHER_DURATION:-90s}"
+    done
+  done
+  echo "publisher artifacts: ${output_root}"
+  if (( ${#failed_suites[@]} > 0 )); then
+    echo "failed suites: ${failed_suites[*]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == stability ]]; then
+  set_concurrency 8
+  run_suite repeated-25 throughput ORION_LOAD_DIAGNOSTICS=true ORION_LOAD_DURATION=2m ORION_LOAD_REPEATS=3 ORION_THROUGHPUT_RATES=25
+  for cpu in 500m 1; do
+    cpu_changed=true
+    kubectl -n "${namespace}" set resources deployment/orion-api -c api --limits="cpu=${cpu}" >/dev/null
+    kubectl -n "${namespace}" rollout status deployment/orion-api --timeout=5m
+    run_suite "mixed-cpu-${cpu}" mixed ORION_LOAD_DIAGNOSTICS=true \
+      ORION_MIXED_STEADY_DURATION="${ORION_MIXED_STEADY_DURATION:-10m}" \
+      ORION_MIXED_HOTROOM_DURATION="${ORION_MIXED_HOTROOM_DURATION:-2m}"
+  done
+  echo "stability artifacts: ${output_root}"
+  if (( ${#failed_suites[@]} > 0 )); then
+    echo "failed suites: ${failed_suites[*]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
 
 if [[ "${1:-}" == diagnostics ]]; then
   set_concurrency 4
